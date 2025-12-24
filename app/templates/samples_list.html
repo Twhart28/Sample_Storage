@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="header-row">
+    <h1>Samples</h1>
+    <a class="button" href="/samples/new">New sample</a>
+  </div>
+  <form method="get" action="/samples" class="form-inline">
+    <input type="text" name="q" placeholder="Search" value="{{ filters.q }}" />
+    <select name="status">
+      <option value="">All statuses</option>
+      <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+      <option value="consumed" {% if filters.status == 'consumed' %}selected{% endif %}>Consumed</option>
+      <option value="archived" {% if filters.status == 'archived' %}selected{% endif %}>Archived</option>
+    </select>
+    <select name="sample_type_id">
+      <option value="">All types</option>
+      {% for sample_type in sample_types %}
+        <option value="{{ sample_type.id }}" {% if filters.sample_type_id == sample_type.id %}selected{% endif %}>{{ sample_type.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort">
+      <option value="sample_id" {% if filters.sort == 'sample_id' %}selected{% endif %}>Sample ID</option>
+      <option value="created_at" {% if filters.sort == 'created_at' %}selected{% endif %}>Newest</option>
+    </select>
+    <button type="submit">Apply</button>
+  </form>
+</section>
+<section class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Sample ID</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Type</th>
+        <th>Location</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sample in samples %}
+      <tr>
+        <td><a href="/samples/{{ sample.id }}">{{ sample.sample_id }}</a></td>
+        <td>{{ sample.name or '' }}</td>
+        <td>{{ sample.status }}</td>
+        <td>{{ sample.sample_type.name if sample.sample_type else '' }}</td>
+        <td>
+          {% if sample.location %}
+            {{ sample.location.position.label }}
+          {% else %}
+            Unplaced
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5">No samples found.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

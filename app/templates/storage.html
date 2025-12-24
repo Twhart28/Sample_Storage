@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>Storage Browser</h1>
+  <form method="post" action="/storage/node" class="form-inline">
+    <input type="text" name="name" placeholder="Name" required />
+    <select name="node_type">
+      <option value="freezer">Freezer</option>
+      <option value="shelf">Shelf</option>
+      <option value="rack">Rack</option>
+      <option value="box">Box</option>
+    </select>
+    <input type="number" name="parent_id" placeholder="Parent ID (optional)" />
+    <button type="submit">Add Node</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Storage Tree</h2>
+  {% macro render_node(node) %}
+    <li id="node-{{ node.id }}">
+      <strong>{{ node.name }}</strong> ({{ node.node_type.value }})
+      {% if node.node_type.value == 'box' %}
+        <a href="/boxes/{{ node.id }}">Open box</a>
+      {% endif %}
+      {% if node.children %}
+        <ul>
+          {% for child in node.children %}
+            {{ render_node(child) }}
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </li>
+  {% endmacro %}
+  <ul>
+    {% for node in root_nodes %}
+      {{ render_node(node) }}
+    {% else %}
+      <li>No storage nodes yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

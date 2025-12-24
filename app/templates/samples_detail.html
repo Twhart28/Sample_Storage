@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="header-row">
+    <h1>Sample {{ sample.sample_id }}</h1>
+    <a class="button" href="/samples/{{ sample.id }}/edit">Edit</a>
+  </div>
+  <p><strong>Name:</strong> {{ sample.name or '—' }}</p>
+  <p><strong>Status:</strong> {{ sample.status }}</p>
+  <p><strong>Type:</strong> {{ sample.sample_type.name if sample.sample_type else '—' }}</p>
+  <p><strong>Volume:</strong> {{ sample.volume or '—' }} {{ sample.volume_units or '' }}</p>
+  <p><strong>Location:</strong> {{ location_path or 'Unplaced' }}</p>
+</section>
+
+<section class="card">
+  <h2>Place or Move Sample</h2>
+  <form method="post" action="/samples/{{ sample.id }}/place" class="form-inline">
+    <input type="number" name="position_id" placeholder="Position ID" required />
+    <button type="submit">Place/Move</button>
+  </form>
+  <p class="hint">Use the box view to copy a position ID.</p>
+</section>
+
+<section class="card">
+  <h2>Event History</h2>
+  <ul class="timeline">
+    {% for event in events %}
+      <li>
+        <strong>{{ event.event_type.value }}</strong>
+        <span>{{ event.created_at }}</span>
+        <div>From: {{ event.from_position_id or '—' }} → To: {{ event.to_position_id or '—' }}</div>
+      </li>
+    {% else %}
+      <li>No events yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

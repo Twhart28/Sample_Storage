@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>{% if sample %}Edit{% else %}New{% endif %} Sample</h1>
+  <form method="post" action="{% if sample %}/samples/{{ sample.id }}{% else %}/samples{% endif %}" class="form">
+    {% if not sample %}
+    <label>Sample ID
+      <input type="text" name="sample_id" required />
+    </label>
+    {% endif %}
+    <label>Name
+      <input type="text" name="name" value="{{ sample.name if sample }}" />
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="active" {% if sample and sample.status == 'active' %}selected{% endif %}>Active</option>
+        <option value="consumed" {% if sample and sample.status == 'consumed' %}selected{% endif %}>Consumed</option>
+        <option value="archived" {% if sample and sample.status == 'archived' %}selected{% endif %}>Archived</option>
+      </select>
+    </label>
+    <label>Volume
+      <input type="number" step="0.01" name="volume" value="{{ sample.volume if sample }}" />
+    </label>
+    <label>Units
+      <input type="text" name="volume_units" value="{{ sample.volume_units if sample }}" />
+    </label>
+    <label>Sample Type
+      <select name="sample_type_id">
+        <option value="">None</option>
+        {% for sample_type in sample_types %}
+          <option value="{{ sample_type.id }}" {% if sample and sample.sample_type_id == sample_type.id %}selected{% endif %}>{{ sample_type.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Notes
+      <textarea name="notes">{{ sample.notes if sample }}</textarea>
+    </label>
+    <button type="submit">Save</button>
+  </form>
+</section>
+{% endblock %}

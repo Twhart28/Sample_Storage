@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>Recent Events</h1>
+  <ul class="timeline">
+    {% for event in events %}
+      <li>
+        <strong>{{ event.event_type.value }}</strong>
+        <span>{{ event.created_at }}</span>
+        <div>Sample: {{ event.sample.sample_id if event.sample else '—' }}</div>
+        <div>From: {{ event.from_position_id or '—' }} → To: {{ event.to_position_id or '—' }}</div>
+      </li>
+    {% else %}
+      <li>No events recorded.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

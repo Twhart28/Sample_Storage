@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>{{ box.name }}</h1>
+  <p>Box ID: {{ box.id }}</p>
+  {% if not positions %}
+    <form method="post" action="/storage/box" class="form-inline">
+      <input type="hidden" name="box_id" value="{{ box.id }}" />
+      <input type="number" name="rows" placeholder="Rows" required />
+      <input type="number" name="cols" placeholder="Columns" required />
+      <button type="submit">Generate positions</button>
+    </form>
+  {% endif %}
+</section>
+<section class="card">
+  <h2>Positions</h2>
+  {% if positions %}
+    <div class="grid-box">
+      {% for position in positions %}
+        <div class="grid-cell {% if position.location %}occupied{% endif %}">
+          <div class="label">{{ position.label }}</div>
+          <div class="meta">ID {{ position.id }}</div>
+          {% if position.location %}
+            <div class="meta">Sample {{ position.location.sample.sample_id }}</div>
+          {% else %}
+            <form method="post" action="/boxes/{{ box.id }}/place">
+              <input type="hidden" name="position_id" value="{{ position.id }}" />
+              <select name="sample_id" required>
+                <option value="">Place sample</option>
+                {% for sample in samples %}
+                  <option value="{{ sample.id }}">{{ sample.sample_id }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit">Place</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No positions yet. Generate positions above.</p>
+  {% endif %}
+</section>
+{% endblock %}
