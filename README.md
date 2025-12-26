@@ -23,7 +23,7 @@ A minimal LabKey-inspired sample tracking and freezer management web app built w
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install fastapi uvicorn sqlalchemy alembic jinja2 python-multipart
+pip install fastapi uvicorn itsdangerous sqlalchemy alembic jinja2 python-multipart
 ```
 
 ## Initialize the Database
