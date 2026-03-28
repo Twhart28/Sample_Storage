@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head bulk-head">
+    <div>
+      <h1>Sample Actions</h1>
+      <p class="muted">Stage samples from the table, then choose a batch action from this workspace.</p>
+    </div>
+    <div class="page-actions">
+      <a class="ghost-button" href="/samples">Back to Samples</a>
+      <a class="ghost-button" href="/samples">Select More Samples</a>
+    </div>
+  </div>
+
+  <div class="analysis-selection-bar" data-sample-actions-workspace>
+    <p class="muted" id="sample-actions-selection-summary">Loading selection...</p>
+    <div class="actions-row">
+      <button type="button" class="ghost-button" id="sample-actions-clear-selection">Clear selection</button>
+    </div>
+    <script id="sample-actions-workspace-bootstrap" type="application/json">{{ bootstrap | tojson }}</script>
+  </div>
+</section>
+
+<section class="workspace-grid">
+  {% for action in actions %}
+    <article class="card">
+      <h2>{{ action.label }}</h2>
+      <p class="muted">{{ action.description }}</p>
+      <div class="actions-row">
+        <a class="button" href="{{ action.workspace_url }}" data-sample-action-link data-action-url="{{ action.workspace_url }}">Open {{ action.label }}</a>
+      </div>
+    </article>
+  {% else %}
+    <article class="card">
+      <p class="muted">No batch actions are available for your account.</p>
+    </article>
+  {% endfor %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/sample-actions.js"></script>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Administration</p>
+    <h1>Studies</h1>
+    <p class="muted">Maintain the controlled study list used in sample forms, search, and import workflows.</p>
+  </div>
+  <div class="page-actions">
+    <a class="ghost-button" href="/admin/configuration">Back to settings</a>
+  </div>
+</section>
+
+{% if error_message %}
+  <p class="form-error">{{ error_message }}</p>
+{% endif %}
+
+<section class="card compact">
+  <h2>Add study</h2>
+  <form method="post" action="/admin/studies" class="form-grid compact-form">
+    <label>Name
+      <input type="text" name="name" required />
+    </label>
+    <label class="span-2">Description
+      <textarea name="description"></textarea>
+    </label>
+    <div class="span-2 actions-row">
+      <button type="submit">Add study</button>
+    </div>
+  </form>
+</section>
+
+<section class="card compact">
+  <div class="section-head">
+    <h2>Existing studies</h2>
+    <span class="muted">{{ studies | length }} total</span>
+  </div>
+  <ul class="metric-list admin-config-list">
+    {% for study in studies %}
+      <li class="admin-config-item">
+        <div class="admin-config-copy">
+          <span>{{ study.name }}</span>
+          <strong>{{ study.description or 'No description' }}</strong>
+          <small class="muted">{{ usage_counts.get(study.id, 0) }} linked samples</small>
+        </div>
+        <div class="admin-config-actions">
+          <details class="admin-edit-card">
+            <summary class="icon-button admin-edit-toggle" title="Edit study">&#9998;</summary>
+            <form method="post" action="/admin/studies/{{ study.id }}" class="form-grid compact-form admin-edit-form">
+              <label>Name
+                <input type="text" name="name" value="{{ study.name }}" required />
+              </label>
+              <label class="span-2">Description
+                <textarea name="description">{{ study.description or '' }}</textarea>
+              </label>
+              <div class="span-2 actions-row">
+                <button type="submit">Save study</button>
+              </div>
+            </form>
+          </details>
+          <form method="post" action="/admin/studies/{{ study.id }}/delete" onsubmit="return confirm('Delete this study? This only works when no samples currently use it.');">
+            <button type="submit" class="ghost-button danger-outline-button">Delete</button>
+          </form>
+        </div>
+      </li>
+    {% else %}
+      <li><span>No studies yet.</span><strong>0</strong></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

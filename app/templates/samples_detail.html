@@ -1,38 +1,160 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="header-row">
-    <h1>Sample {{ sample.sample_id }}</h1>
-    <a class="button" href="/samples/{{ sample.id }}/edit">Edit</a>
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Sample Workspace</p>
+    <h1>{{ sample.sample_id }}</h1>
   </div>
-  <p><strong>Name:</strong> {{ sample.name or '—' }}</p>
-  <p><strong>Status:</strong> {{ sample.status }}</p>
-  <p><strong>Type:</strong> {{ sample.sample_type.name if sample.sample_type else '—' }}</p>
-  <p><strong>Volume:</strong> {{ sample.volume or '—' }} {{ sample.volume_units or '' }}</p>
-  <p><strong>Location:</strong> {{ location_path or 'Unplaced' }}</p>
+  <div class="page-actions">
+    <span class="status-pill">{{ sample.study_role.title() }}</span>
+    {% if can_edit_samples %}
+      <a class="button" href="/samples/{{ sample.id }}/edit">Edit sample</a>
+    {% endif %}
+    {% if can_use_sample_actions %}
+      <button
+        type="button"
+        class="ghost-button"
+        data-sample-action-add
+        data-sample-id="{{ sample.id }}"
+        data-sample-label="{{ sample.sample_id }}"
+      >
+        Add to selection
+      </button>
+    {% endif %}
+    {% if can_delete_samples %}
+      <form method="post" action="/samples/{{ sample.id }}/delete" onsubmit="return confirm('Delete this sample permanently?{% if sample.location_path %} This will also free its current storage position.{% endif %}');">
+        <button type="submit" class="danger-button">Delete sample</button>
+      </form>
+    {% endif %}
+  </div>
 </section>
 
-<section class="card">
-  <h2>Place or Move Sample</h2>
-  <form method="post" action="/samples/{{ sample.id }}/place" class="form-inline">
-    <input type="number" name="position_id" placeholder="Position ID" required />
-    <button type="submit">Place/Move</button>
-  </form>
-  <p class="hint">Use the box view to copy a position ID.</p>
+<section class="workspace-grid">
+  <article class="card">
+    <h2>Core record</h2>
+    <dl class="detail-grid">
+      <div><dt title="{{ label_help.type }}">Type</dt><dd>{{ sample.sample_type_name or 'Unassigned' }}</dd></div>
+      <div><dt title="{{ label_help.study }}">Study</dt><dd>{{ sample.study_name or '--' }}</dd></div>
+      <div><dt title="{{ label_help.visit }}">Visit</dt><dd>{{ sample.visit_label or '--' }}</dd></div>
+      <div><dt title="{{ label_help.timepoint }}">Timepoint</dt><dd>{{ sample.timepoint_label or '--' }}</dd></div>
+      <div><dt title="{{ label_help.aliquot }}">Aliquot</dt><dd>{{ sample.aliquot_number if sample.aliquot_number is not none else '--' }}</dd></div>
+      <div><dt title="{{ label_help.hemolysis }}">Hemolysis</dt><dd>{{ sample.hemolysis_classification if sample.hemolysis_classification is not none else '--' }}</dd></div>
+      <div><dt title="{{ label_help.study_role }}">Study Role</dt><dd>{{ sample.study_role.title() }}</dd></div>
+      <div><dt>Thaw Count</dt><dd>{{ sample.thaw_count }}</dd></div>
+      <div><dt title="{{ label_help.volume }}">Volume</dt><dd>{{ sample.volume if sample.volume is not none else '--' }} {{ sample.volume_units or '' }}</dd></div>
+      <div><dt title="{{ label_help.collection }}">Collection</dt><dd>{{ format_datetime(sample.collection_at) }}</dd></div>
+      <div><dt>Location</dt><dd>{{ sample.location_path or 'Unplaced' }}</dd></div>
+      <div><dt title="{{ label_help.registered }}">Registered</dt><dd>{{ format_datetime(sample.created_at) }}</dd></div>
+      <div><dt title="{{ label_help.updated }}">Updated</dt><dd>{{ format_datetime(sample.updated_at) }}</dd></div>
+    </dl>
+    <div class="notes-block">
+      <strong title="{{ label_help.notes }}">Notes</strong>
+      <p>{{ sample.notes or 'No notes recorded.' }}</p>
+    </div>
+  </article>
+
+  <article class="card">
+    <h2>Storage actions</h2>
+    {% if can_use_sample_actions %}
+      <div class="sample-actions-row actions-row">
+        <button
+          type="button"
+          class="ghost-button"
+          data-sample-action-add
+          data-sample-id="{{ sample.id }}"
+          data-sample-label="{{ sample.sample_id }}"
+        >
+          Add this sample to selection
+        </button>
+      </div>
+    {% endif %}
+    {% if can_place_move_samples %}
+      <form method="post" action="/samples/{{ sample.id }}/place" class="stack-form">
+        <label>Place into position ID
+          <input type="number" name="position_id" required />
+        </label>
+        <button type="submit">Place sample</button>
+      </form>
+      <form method="post" action="/samples/{{ sample.id }}/move" class="stack-form">
+        <label>Move to position ID
+          <input type="number" name="to_position_id" required />
+        </label>
+        <button type="submit">Move sample</button>
+      </form>
+    {% endif %}
+    {% if can_archive_samples %}
+      <form method="post" action="/samples/{{ sample.id }}/retrieve" class="stack-form">
+        <label>Archive note
+          <input type="text" name="note" placeholder="Optional note" />
+        </label>
+        <button type="submit">Archive sample</button>
+      </form>
+    {% endif %}
+    <div class="mini-links">
+      {% for box in boxes %}
+        <a href="/boxes/{{ box.id }}">{{ box.name }}</a>
+      {% else %}
+        <span class="muted">No boxes configured yet.</span>
+      {% endfor %}
+    </div>
+  </article>
 </section>
 
-<section class="card">
-  <h2>Event History</h2>
-  <ul class="timeline">
-    {% for event in events %}
-      <li>
-        <strong>{{ event.event_type.value }}</strong>
-        <span>{{ event.created_at }}</span>
-        <div>From: {{ event.from_position_id or '—' }} → To: {{ event.to_position_id or '—' }}</div>
-      </li>
-    {% else %}
-      <li>No events yet.</li>
-    {% endfor %}
-  </ul>
+<section class="workspace-grid">
+  <article class="card">
+    <div class="section-head">
+      <h2>Activity Notes</h2>
+    </div>
+    {% if can_edit_samples %}
+      <form method="post" action="/samples/{{ sample.id }}/notes" class="stack-form compact-form">
+        <label>Add note entry
+          <textarea name="text" placeholder="Record sample use, thaw details, or handling notes" required></textarea>
+        </label>
+        <button type="submit">Add note</button>
+      </form>
+    {% endif %}
+    <ul class="timeline">
+      {% for note in sample.note_entries %}
+        <li>
+          <div>
+            <strong>{{ note.username or 'system' }}</strong>
+            <small>{{ format_datetime(note.created_at) }}</small>
+          </div>
+          <div class="subtle">{{ note.text }}</div>
+        </li>
+      {% else %}
+        <li>No note history yet.</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="card">
+    <div class="section-head">
+      <h2>Event history</h2>
+      <a href="/events">Full activity feed</a>
+    </div>
+    <ul class="timeline">
+      {% for event in sample.events %}
+        <li>
+          <div>
+            <strong>{{ event.action_label }} · {{ event.title }}</strong>
+            <small>{{ format_datetime(event.created_at) }}</small>
+          </div>
+          {% if event.context_line %}
+            <div class="subtle">{{ event.context_line }}</div>
+          {% endif %}
+        </li>
+      {% else %}
+        <li>No recorded events.</li>
+      {% endfor %}
+    </ul>
+  </article>
 </section>
+{% endblock %}
+
+{% block scripts %}
+  {% if can_use_sample_actions %}
+    <script id="sample-actions-page-bootstrap" type="application/json">{{ {"workspace_url": "/sample-actions", "storage_key": "sample-action-selection"} | tojson }}</script>
+    <script src="/static/sample-actions.js"></script>
+  {% endif %}
 {% endblock %}

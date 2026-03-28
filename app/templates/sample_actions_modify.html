@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head bulk-head">
+    <div>
+      <h1>Batch Modify</h1>
+      <p class="muted">Download a metadata workbook for the staged samples, edit the target values offline, then upload it for validation and commit.</p>
+    </div>
+    <div class="page-actions">
+      <a class="ghost-button" href="/sample-actions">Back to Actions</a>
+      <a class="ghost-button" href="/samples">Select More Samples</a>
+    </div>
+  </div>
+
+  <div class="analysis-selection-bar" data-sample-action-page>
+    <p class="muted" id="sample-action-selection-summary">Loading selection...</p>
+    <div class="actions-row">
+      <a class="ghost-button" href="/sample-actions/modify/log" id="sample-action-download-log" data-action-url="/sample-actions/modify/log">Generate modify log</a>
+      <button type="button" class="ghost-button" id="sample-action-clear-selection">Clear selection</button>
+      <a class="ghost-button" href="/sample-actions" data-sample-action-link data-action-url="/sample-actions">View actions</a>
+    </div>
+    <script id="sample-action-page-bootstrap" type="application/json">{{ bootstrap | tojson }}</script>
+  </div>
+
+  {% if error_message %}
+    <p class="form-error">{{ error_message }}</p>
+  {% endif %}
+
+  <form method="post" action="/sample-actions/modify/preview" enctype="multipart/form-data" class="stack-form">
+    <input type="hidden" name="raw_payload" value="{{ raw_payload }}" />
+    <label>Batch Modify Workbook
+      <input type="file" name="modify_file" accept=".xlsx" />
+    </label>
+    <p class="muted">Target columns are prefilled with current values. Clear a nullable field to remove its value from the sample record.</p>
+    <div class="actions-row">
+      <button type="submit">Preview Batch Modify Upload</button>
+    </div>
+  </form>
+</section>
+
+{% if preview %}
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>Preview</h2>
+        <p class="muted">{{ preview.valid_rows }} valid / {{ preview.invalid_rows }} invalid / {{ preview.total_rows }} total</p>
+      </div>
+    </div>
+    {% if preview.global_errors %}
+      <div class="bulk-errors">
+        {% for error in preview.global_errors %}
+          <p class="form-error">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if preview.rows %}
+      <form method="post" action="/sample-actions/modify/commit" class="stack-form">
+        <textarea name="raw_payload" class="hidden">{{ preview.raw_payload }}</textarea>
+        <div class="actions-row">
+          <button type="submit" {% if preview.valid_rows == 0 or preview.invalid_rows or preview.global_errors %}disabled{% endif %}>Commit Batch Modify</button>
+        </div>
+      </form>
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>Sample</th>
+              <th>Type</th>
+              <th>Study</th>
+              <th>Study Role</th>
+              <th>Visit</th>
+              <th>Timepoint</th>
+              <th>Aliquot</th>
+              <th>Hemolysis</th>
+              <th>Volume</th>
+              <th>Thaw</th>
+              <th>Status</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview.rows %}
+              <tr class="bulk-row-{{ row.status }}">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.sample_id or row.sample_pk or '--' }}</td>
+                <td>{{ row.sample_type or '--' }}</td>
+                <td>{{ row.study or '--' }}</td>
+                <td>{{ row.study_role or '--' }}</td>
+                <td>{{ row.visit or '--' }}</td>
+                <td>{{ row.timepoint or '--' }}</td>
+                <td>{{ row.aliquot or '--' }}</td>
+                <td>{{ row.hemolysis or '--' }}</td>
+                <td>{{ row.volume or '--' }} {{ row.volume_units or '' }}</td>
+                <td>{{ row.thaw_count or '--' }}</td>
+                <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.errors | join('; ') or '--' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if result %}
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>Commit Result</h2>
+        <p class="muted">{{ result.imported_rows }} imported / {{ result.skipped_rows }} blocked / {{ result.failed_rows }} failed</p>
+      </div>
+    </div>
+    {% if result.batch_group_id %}
+      <p class="muted">Batch modify group {{ result.batch_group_id }} was recorded.</p>
+    {% endif %}
+    {% if result.global_errors %}
+      <div class="bulk-errors">
+        {% for error in result.global_errors %}
+          <p class="form-error">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if result.rows %}
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>Sample</th>
+              <th>Status</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in result.rows %}
+              <tr class="bulk-row-{{ row.status }}">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.sample_id or row.sample_pk or '--' }}</td>
+                <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.errors | join('; ') or '--' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/sample-actions.js"></script>
+{% endblock %}

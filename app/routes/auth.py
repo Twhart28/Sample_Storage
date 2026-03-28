@@ -38,12 +38,3 @@ async def login(request: Request, username: str = Form(...), db: Session = Depen
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
-
-
-@router.post("/admin/seed")
-async def seed(request: Request, db: Session = Depends(get_db)):
-    user = crud.get_user_by_username(db, "admin")
-    if not user:
-        user = crud.create_user(db, username="admin", full_name="Admin")
-    crud.seed_storage(db, user)
-    return RedirectResponse("/storage", status_code=303)

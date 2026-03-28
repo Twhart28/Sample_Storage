@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Settings</p>
+    <h1>Users &amp; Roles</h1>
+    <p class="muted">Manage display names and access level for users who sign into this workspace.</p>
+  </div>
+  <div class="page-actions">
+    <a class="ghost-button" href="/settings">Back to settings</a>
+  </div>
+</section>
+
+{% if error_message %}
+  <p class="form-error">{{ error_message }}</p>
+{% endif %}
+
+<section class="card compact">
+  <div class="section-head">
+    <h2>Workspace users</h2>
+    <span class="muted">{{ users | length }} total</span>
+  </div>
+  <p class="muted">New users are created as staff when they sign in for the first time. The first user in an empty workspace becomes admin automatically.</p>
+  <ul class="metric-list admin-config-list">
+    {% for user in users %}
+      <li class="admin-config-item">
+        <div class="admin-config-copy">
+          <span>{{ user.username }}</span>
+          <strong>{{ user.full_name or 'No display name' }}</strong>
+          <small class="muted">Created {{ format_datetime(user.created_at) }}</small>
+        </div>
+        <details class="admin-edit-card admin-user-edit-card">
+          <summary class="icon-button admin-edit-toggle" title="Edit user">&#9998;</summary>
+          <form method="post" action="/settings/users/{{ user.id }}" class="form-grid compact-form admin-edit-form">
+            <label>Username
+              <input type="text" value="{{ user.username }}" disabled />
+            </label>
+            <label>Role
+              <select name="role">
+                <option value="staff" {% if user.role.value == 'staff' %}selected{% endif %}>staff</option>
+                <option value="admin" {% if user.role.value == 'admin' %}selected{% endif %}>admin</option>
+              </select>
+            </label>
+            <label class="span-2">Full Name
+              <input type="text" name="full_name" value="{{ user.full_name or '' }}" />
+            </label>
+            <div class="span-2">
+              <strong>User Actions</strong>
+              <p class="muted">Role provides defaults. These checkboxes set the specific actions this user can perform.</p>
+              <div class="settings-option-grid">
+                {% for permission in permission_definitions %}
+                  <label class="settings-option-card">
+                    <input
+                      type="checkbox"
+                      name="permissions"
+                      value="{{ permission.key }}"
+                      {% if permission.key in effective_permissions_by_user.get(user.id, []) %}checked{% endif %}
+                    />
+                    <span>
+                      <strong>{{ permission.label }}</strong><br />
+                      <small class="muted">{{ permission.description }}</small>
+                    </span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="span-2 actions-row">
+              <button type="submit">Save user</button>
+            </div>
+          </form>
+        </details>
+      </li>
+    {% else %}
+      <li><span>No users yet.</span><strong>0</strong></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Administration</p>
+    <h1>Sample Types</h1>
+    <p class="muted">Maintain the controlled list used in sample entry forms, filters, and bulk imports.</p>
+  </div>
+  <div class="page-actions">
+    <a class="ghost-button" href="/admin/configuration">Back to settings</a>
+  </div>
+</section>
+
+{% if error_message %}
+  <p class="form-error">{{ error_message }}</p>
+{% endif %}
+
+<section class="card compact">
+  <h2>Add sample type</h2>
+  <form method="post" action="/admin/sample-types" class="form-grid compact-form">
+    <label>Name
+      <input type="text" name="name" required />
+    </label>
+    <label>Description
+      <input type="text" name="description" />
+    </label>
+    <div class="span-2 actions-row">
+      <button type="submit">Add sample type</button>
+    </div>
+  </form>
+</section>
+
+<section class="card compact">
+  <div class="section-head">
+    <h2>Existing sample types</h2>
+    <span class="muted">{{ sample_types | length }} total</span>
+  </div>
+  <ul class="metric-list admin-config-list">
+    {% for sample_type in sample_types %}
+      <li class="admin-config-item">
+        <div class="admin-config-copy">
+          <span>{{ sample_type.name }}</span>
+          <strong>{{ sample_type.description or 'No description' }}</strong>
+          <small class="muted">{{ usage_counts.get(sample_type.id, 0) }} linked samples</small>
+        </div>
+        <div class="admin-config-actions">
+          <details class="admin-edit-card">
+            <summary class="icon-button admin-edit-toggle" title="Edit sample type">&#9998;</summary>
+            <form method="post" action="/admin/sample-types/{{ sample_type.id }}" class="form-grid compact-form admin-edit-form">
+              <label>Name
+                <input type="text" name="name" value="{{ sample_type.name }}" required />
+              </label>
+              <label>Description
+                <input type="text" name="description" value="{{ sample_type.description or '' }}" />
+              </label>
+              <div class="span-2 actions-row">
+                <button type="submit">Save sample type</button>
+              </div>
+            </form>
+          </details>
+          <form method="post" action="/admin/sample-types/{{ sample_type.id }}/delete" onsubmit="return confirm('Delete this sample type? This only works when no samples currently use it.');">
+            <button type="submit" class="ghost-button danger-outline-button">Delete</button>
+          </form>
+        </div>
+      </li>
+    {% else %}
+      <li><span>No sample types yet.</span><strong>0</strong></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

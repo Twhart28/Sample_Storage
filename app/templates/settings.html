@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Settings</p>
+    <h1>Workspace Settings</h1>
+    <p class="muted">Manage your account details and browser-level defaults for the sample and storage workspaces.</p>
+  </div>
+</section>
+
+{% if saved_section == 'account' %}
+  <p class="settings-notice">Account settings updated.</p>
+{% endif %}
+
+<section class="workspace-grid">
+  <article class="card compact">
+    <div class="section-head">
+      <h2>Account</h2>
+      <span class="muted">Saved to your user profile</span>
+    </div>
+    <form method="post" action="/settings/account" class="form-grid compact-form">
+      <label>Username
+        <input type="text" value="{{ current_user.username }}" disabled />
+      </label>
+      <label>Role
+        <input type="text" value="{{ current_user.role.value }}" disabled />
+      </label>
+      <label class="span-2">Full Name
+        <input type="text" name="full_name" value="{{ current_user.full_name or '' }}" placeholder="Your display name" />
+      </label>
+      <div class="span-2 actions-row">
+        <button type="submit">Save account</button>
+      </div>
+    </form>
+  </article>
+
+  <article class="card compact" data-settings-client>
+    <div class="section-head">
+      <h2>Sample Workspace</h2>
+      <span class="muted">Stored in this browser</span>
+    </div>
+    <p class="muted">Choose which columns appear by default in the live sample table.</p>
+    <div class="settings-option-grid" id="settings-sample-columns"></div>
+    <div class="actions-row settings-client-actions">
+      <button type="button" data-settings-action="save-sample-columns">Save columns</button>
+      <button type="button" class="ghost-button" data-settings-action="reset-sample-columns">Reset defaults</button>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <div class="section-head">
+      <h2>Storage Workspace</h2>
+      <span class="muted">Stored in this browser</span>
+    </div>
+    <p class="muted">Set the default box-view details and zoom used when you open a box from storage.</p>
+    <div class="settings-option-grid" id="settings-box-fields"></div>
+    <label class="settings-zoom-field">Default Box Zoom
+      <input type="range" min="70" max="140" step="5" value="100" id="settings-box-zoom" />
+      <span id="settings-box-zoom-value">100%</span>
+    </label>
+    <div class="actions-row settings-client-actions">
+      <button type="button" data-settings-action="save-box-settings">Save box defaults</button>
+      <button type="button" class="ghost-button" data-settings-action="reset-box-settings">Reset defaults</button>
+    </div>
+
+    <p class="settings-notice hidden" id="settings-client-notice"></p>
+    <script id="settings-bootstrap" type="application/json">{{ settings_bootstrap | tojson }}</script>
+  </article>
+</section>
+
+<section class="workspace-grid">
+  <article class="card compact">
+    <div class="section-head">
+      <h2>Imports</h2>
+      <span class="muted">Templates and tools</span>
+    </div>
+    <div class="settings-link-list">
+      <a class="admin-settings-row" href="/samples/bulk">
+        <div class="admin-settings-copy">
+          <strong>Bulk Add Samples</strong>
+          <span class="muted">Open the sample import workflow and preview valid rows before commit.</span>
+        </div>
+        <span class="admin-settings-chevron" aria-hidden="true">&rsaquo;</span>
+      </a>
+      <a class="admin-settings-row" href="/samples/bulk/template">
+        <div class="admin-settings-copy">
+          <strong>Sample Import Template</strong>
+          <span class="muted">Download the Excel workbook with comments, dropdowns, and field guidance.</span>
+        </div>
+        <span class="admin-settings-chevron" aria-hidden="true">&rsaquo;</span>
+      </a>
+      {% if has_permission(current_user, 'bulk_import_storage') %}
+        <a class="admin-settings-row" href="/storage/bulk">
+          <div class="admin-settings-copy">
+            <strong>Bulk Import Boxes</strong>
+            <span class="muted">Import boxes under existing shelf or rack paths from the storage workflow.</span>
+          </div>
+          <span class="admin-settings-chevron" aria-hidden="true">&rsaquo;</span>
+        </a>
+        <a class="admin-settings-row" href="/storage/bulk/template">
+          <div class="admin-settings-copy">
+            <strong>Box Import Template</strong>
+            <span class="muted">Download the Excel workbook for boxes-only storage imports.</span>
+          </div>
+          <span class="admin-settings-chevron" aria-hidden="true">&rsaquo;</span>
+        </a>
+      {% endif %}
+    </div>
+  </article>
+
+  {% if admin_links %}
+    <article class="card compact">
+      <div class="section-head">
+        <h2>Admin Controls</h2>
+        <span class="muted">Visible only with the required permissions</span>
+      </div>
+      <div class="settings-link-list">
+        {% for item in admin_links %}
+          <a class="admin-settings-row" href="{{ item.href }}">
+            <div class="admin-settings-copy">
+              <strong>{{ item.title }}</strong>
+              <span class="muted">{{ item.description }}</span>
+            </div>
+            <div class="admin-settings-meta">
+              <span class="status-pill">{{ item.count }}</span>
+              <span class="admin-settings-chevron" aria-hidden="true">&rsaquo;</span>
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    </article>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/settings.js"></script>
+{% endblock %}

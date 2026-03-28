@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head bulk-head">
+    <div>
+      <h1>Bulk Add Samples</h1>
+      <p class="muted">Paste spreadsheet rows or upload a CSV, preview the validation, then import the valid rows.</p>
+    </div>
+    <div class="page-actions">
+      <a class="ghost-button" href="/samples">Back to Samples</a>
+      <a class="ghost-button" href="/samples/bulk/template">Download Excel Template</a>
+      <a class="ghost-button" href="/samples/bulk/template.csv">Download CSV Template</a>
+    </div>
+  </div>
+  <p class="muted">Expected columns: <code>{{ template_headers | join(', ') }}</code></p>
+  <form method="post" action="/samples/bulk/preview" enctype="multipart/form-data" class="stack-form">
+    <div class="filter-grid">
+      <label class="span-2">Paste Data
+        <textarea name="raw_payload" placeholder="Paste CSV or tab-separated rows here">{{ raw_payload }}</textarea>
+      </label>
+      <label>Import File
+        <input type="file" name="csv_file" accept=".csv,.txt,.tsv,.xlsx" />
+      </label>
+    </div>
+    <p class="muted">The Excel template includes header comments. Use the <code>box</code> column to place samples into specific boxes. Leave it blank to create samples unplaced.</p>
+    <div class="actions-row">
+      <button type="submit">Preview Import</button>
+    </div>
+  </form>
+</section>
+
+{% if preview %}
+  <section class="card">
+    <div class="section-head">
+      <h2>Preview</h2>
+      <p class="muted">{{ preview.valid_rows }} valid / {{ preview.invalid_rows }} invalid / {{ preview.total_rows }} total</p>
+    </div>
+    {% if preview.global_errors %}
+      <div class="bulk-errors">
+        {% for error in preview.global_errors %}
+          <p class="form-error">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if preview.rows %}
+      <form method="post" action="/samples/bulk/commit" class="stack-form">
+        <textarea name="raw_payload" class="hidden">{{ preview.raw_payload }}</textarea>
+        <div class="actions-row">
+          <button type="submit" {% if preview.valid_rows == 0 or preview.global_errors %}disabled{% endif %}>Import Valid Rows</button>
+        </div>
+      </form>
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>ID</th>
+              <th>Type</th>
+              <th>Study</th>
+              <th>Visit</th>
+              <th>Timepoint</th>
+              <th>Hemolysis</th>
+              <th>Study Role</th>
+              <th>Volume</th>
+              <th>Box</th>
+              <th>Position</th>
+              <th>Status</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview.rows %}
+              <tr class="bulk-row-{{ row.status }}">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.sample_id or '--' }}</td>
+                <td>{{ row.sample_type or '--' }}</td>
+                <td>{{ row.study or '--' }}</td>
+                <td>{{ row.visit or '--' }}</td>
+                <td>{{ row.timepoint or '--' }}</td>
+                <td>{{ row.hemolysis or '--' }}</td>
+                <td>{{ row.study_role or 'current' }}</td>
+                <td>{% if row.volume %}{{ row.volume }} {{ row.volume_units or 'mL' }}{% else %}--{% endif %}</td>
+                <td>{{ row.assigned_box_name or row.box or '--' }}</td>
+                <td>{{ row.assigned_position or row.position or '--' }}</td>
+                <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.errors | join('; ') or '--' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if result %}
+  <section class="card">
+    <div class="section-head">
+      <h2>Import Result</h2>
+      <p class="muted">{{ result.imported_rows }} imported / {{ result.skipped_rows }} skipped / {{ result.failed_rows }} failed</p>
+    </div>
+    {% if result.global_errors %}
+      <div class="bulk-errors">
+        {% for error in result.global_errors %}
+          <p class="form-error">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if result.rows %}
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>ID</th>
+              <th>Status</th>
+              <th>Box</th>
+              <th>Position</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in result.rows %}
+              <tr class="bulk-row-{{ row.status }}">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.sample_id or '--' }}</td>
+                <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.assigned_box_name or row.box or '--' }}</td>
+                <td>{{ row.assigned_position or row.position or '--' }}</td>
+                <td>{{ row.errors | join('; ') or '--' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}

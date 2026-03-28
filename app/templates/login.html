@@ -1,15 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h1>Login</h1>
-  <form method="post" action="/login" class="form">
+<section class="card login-card">
+  <div>
+    <p class="eyebrow">Access</p>
+    <h1>Enter the workspace</h1>
+    {% if is_first_user %}
+      <p class="muted">The first user created in this workspace becomes an admin automatically.</p>
+    {% else %}
+      <p class="muted">Sign in with your username. New users are created as staff and can be promoted from Settings by an admin.</p>
+    {% endif %}
+  </div>
+  <form method="post" action="/login" class="stack-form">
     <label>Username
       <input type="text" name="username" required />
     </label>
+    <label>Full name
+      <input type="text" name="full_name" />
+    </label>
     <button type="submit">Sign in</button>
-  </form>
-  <form method="post" action="/admin/seed" class="form">
-    <button type="submit">Seed demo storage</button>
   </form>
 </section>
 {% endblock %}

@@ -1,18 +1,159 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h1>Recent Events</h1>
-  <ul class="timeline">
-    {% for event in events %}
-      <li>
-        <strong>{{ event.event_type.value }}</strong>
-        <span>{{ event.created_at }}</span>
-        <div>Sample: {{ event.sample.sample_id if event.sample else '—' }}</div>
-        <div>From: {{ event.from_position_id or '—' }} → To: {{ event.to_position_id or '—' }}</div>
-      </li>
-    {% else %}
-      <li>No events recorded.</li>
-    {% endfor %}
-  </ul>
+<section class="card compact activity-toolbar-card">
+  <form method="get" action="/events" class="activity-toolbar">
+    <label class="activity-filter-field">
+      <span>Sample</span>
+      <input type="text" name="sample_query" value="{{ filters.sample_query }}" placeholder="Search sample ID or related event text" />
+    </label>
+    <label class="activity-filter-field">
+      <span>Action</span>
+      <select name="event_type">
+        <option value="">All actions</option>
+        {% for option in event_type_options %}
+          <option value="{{ option.value }}" {% if filters.event_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="activity-filter-field">
+      <span>User</span>
+      <select name="user_id">
+        <option value="">All users</option>
+        {% for option in event_user_options %}
+          <option value="{{ option.id }}" {% if filters.user_id == (option.id ~ '') %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="activity-filter-field">
+      <span>From</span>
+      <input type="datetime-local" name="date_from" value="{{ filters.date_from }}" />
+    </label>
+    <label class="activity-filter-field">
+      <span>To</span>
+      <input type="datetime-local" name="date_to" value="{{ filters.date_to }}" />
+    </label>
+    <div class="activity-toolbar-actions">
+      <button type="submit">Apply</button>
+      <a class="ghost-button" href="/events">Reset</a>
+      {% if can_export_data %}
+        <a class="ghost-button" href="/api/exports/snapshot">Export</a>
+      {% endif %}
+    </div>
+  </form>
 </section>
+
+<section class="card activity-feed-card">
+  <div class="activity-feed-head">
+    <div>
+      <p class="eyebrow">Operational Feed</p>
+      <h1>Activity</h1>
+    </div>
+    <p class="samples-result-count">{{ events|length }} event{% if events|length != 1 %}s{% endif %}</p>
+  </div>
+
+  {% if events %}
+    <div class="activity-feed" id="activity-feed">
+      {% for event in events %}
+        {% if event.is_group_parent %}
+          <button
+            type="button"
+            class="activity-entry activity-entry--group-parent"
+            data-group-toggle="{{ event.group_id }}"
+            data-risk-level="{{ event.risk_level }}"
+            aria-expanded="{{ 'true' if event.group_expanded_default else 'false' }}"
+          >
+            <div class="activity-entry-rail"></div>
+            <div class="activity-entry-body">
+              <div class="activity-entry-head">
+                <div class="activity-entry-head-main">
+                  <span class="activity-entry-toggle-icon" aria-hidden="true">&#9656;</span>
+                  <span class="activity-entry-action">{{ event.action_label }}</span>
+                </div>
+                <span class="activity-entry-time">{{ format_datetime(event.created_at) }}</span>
+              </div>
+              <div class="activity-entry-summary">{{ event.title }}</div>
+              {% if event.context_line %}
+                <p class="activity-entry-subtitle">{{ event.context_line }}</p>
+              {% endif %}
+              <div class="activity-entry-meta">
+                {% for item in event.pill_items %}
+                  <span class="activity-entry-meta-pill">
+                    <span class="activity-entry-meta-label">{{ item.label }}</span>
+                    <span class="activity-entry-meta-value">{{ item.value }}</span>
+                  </span>
+                {% endfor %}
+              </div>
+            </div>
+          </button>
+        {% else %}
+          <button
+            type="button"
+            class="activity-entry{% if event.is_group_child %} activity-entry--group-child{% endif %}"
+            data-event-id="{{ event.id }}"
+            data-risk-level="{{ event.risk_level }}"
+            {% if event.is_group_child %}
+              data-group-child="{{ event.group_id }}"
+              {% if not event.group_expanded_default %}hidden{% endif %}
+            {% endif %}
+          >
+            <div class="activity-entry-rail"></div>
+            <div class="activity-entry-body">
+              <div class="activity-entry-head">
+                <span class="activity-entry-action">{{ event.action_label }}</span>
+                <span class="activity-entry-time">{{ format_datetime(event.created_at) }}</span>
+              </div>
+              <div class="activity-entry-summary">{{ event.title }}</div>
+              {% if event.context_line %}
+                <p class="activity-entry-subtitle">{{ event.context_line }}</p>
+              {% endif %}
+              {% if event.change_items %}
+                <div class="activity-entry-preview">
+                  {% for change in event.change_items[:2] %}
+                    <span class="activity-entry-preview-chip">{{ change.label }}: {{ change.before }} -> {{ change.after }}</span>
+                  {% endfor %}
+                  {% if event.change_items|length > 2 %}
+                    <span class="activity-entry-preview-chip">+{{ event.change_items|length - 2 }} more</span>
+                  {% endif %}
+                </div>
+              {% endif %}
+              <div class="activity-entry-meta">
+                {% for item in event.pill_items %}
+                  <span class="activity-entry-meta-pill">
+                    <span class="activity-entry-meta-label">{{ item.label }}</span>
+                    <span class="activity-entry-meta-value">{{ item.value }}</span>
+                  </span>
+                {% endfor %}
+              </div>
+            </div>
+          </button>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="samples-empty-state">
+      <p>No activity matches the current filters.</p>
+    </div>
+  {% endif %}
+</section>
+
+<div class="activity-detail-overlay hidden" id="activity-detail-overlay" hidden>
+  <div class="activity-detail-backdrop" data-close-activity-detail></div>
+  <aside class="activity-detail-drawer" aria-labelledby="activity-detail-title">
+    <div class="activity-detail-head">
+      <div>
+        <p class="eyebrow">Event Detail</p>
+        <h2 id="activity-detail-title">Activity detail</h2>
+      </div>
+      <button type="button" class="ghost-button activity-detail-close" data-close-activity-detail>Close</button>
+    </div>
+    <div class="activity-detail-body" id="activity-detail-body">
+      <p class="muted">Select an activity row to inspect it.</p>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script id="activity-events-data" type="application/json">{{ events_json|tojson }}</script>
+  <script src="/static/events.js"></script>
 {% endblock %}

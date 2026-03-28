@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head bulk-head">
+    <div>
+      <h1>Analysis Workspace</h1>
+      <p class="muted">Analyses stay out of the sample table until you enter Analyze mode, select samples, download a log, and upload it back for validation.</p>
+    </div>
+    <div class="page-actions">
+      <a class="ghost-button" href="/samples">Back to Samples</a>
+      <a class="ghost-button" href="/samples">Select More Samples</a>
+    </div>
+  </div>
+
+  <div class="analysis-selection-bar" data-analysis-workspace>
+    <p class="muted" id="analysis-selection-summary">Loading selection...</p>
+    <div class="actions-row">
+      <a class="ghost-button" href="/analyses/log" id="analysis-download-log">Generate analysis log</a>
+      <button type="button" class="ghost-button" id="analysis-clear-selection">Clear selection</button>
+    </div>
+    <script id="analysis-workspace-bootstrap" type="application/json">{{ bootstrap | tojson }}</script>
+  </div>
+
+  {% if error_message %}
+    <p class="form-error">{{ error_message }}</p>
+  {% endif %}
+
+  <form method="post" action="/analyses/preview" enctype="multipart/form-data" class="stack-form">
+    <input type="hidden" name="raw_payload" value="{{ raw_payload }}" />
+    <label>Analysis Workbook
+      <input type="file" name="analysis_file" accept=".xlsx" />
+    </label>
+    <p class="muted">The workbook includes optional batch header fields plus one row per selected sample. Fill it out offline, then upload it here for preview.</p>
+    <div class="actions-row">
+      <button type="submit">Preview Analysis Upload</button>
+    </div>
+  </form>
+</section>
+
+{% if preview %}
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>Preview</h2>
+        <p class="muted">{{ preview.valid_rows }} valid / {{ preview.invalid_rows }} invalid / {{ preview.total_rows }} total</p>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><dt>Analysis type</dt><dd>{{ preview.analysis_type or '--' }}</dd></div>
+      <div><dt>Performed at</dt><dd>{{ preview.performed_at or '--' }}</dd></div>
+      <div><dt>Overall notes</dt><dd>{{ preview.overall_notes or '--' }}</dd></div>
+    </div>
+    {% if preview.global_errors %}
+      <div class="bulk-errors">
+        {% for error in preview.global_errors %}
+          <p class="form-error">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if preview.rows %}
+      <form method="post" action="/analyses/commit" class="stack-form">
+        <textarea name="raw_payload" class="hidden">{{ preview.raw_payload }}</textarea>
+        <div class="actions-row">
+          <button type="submit" {% if preview.valid_rows == 0 or preview.invalid_rows or preview.global_errors %}disabled{% endif %}>Commit Analysis Batch</button>
+        </div>
+      </form>
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>Sample</th>
+              <th>Current Box</th>
+              <th>Current Pos</th>
+              <th>Remaining</th>
+              <th>Disposition</th>
+              <th>Return Box</th>
+              <th>Return Pos</th>
+              <th>Thaw</th>
+              <th>Status</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview.rows %}
+              <tr class="bulk-row-{{ row.status }}">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.sample_id or row.sample_pk or '--' }}</td>
+                <td>{{ row.current_box or '--' }}</td>
+                <td>{{ row.current_position or '--' }}</td>
+                <td>{{ row.remaining_volume or '--' }} {{ row.volume_units or '' }}</td>
+                <td>{{ 'Returned' if row.returned_to_storage == 'yes' else 'Archived' }}</td>
+                <td>{{ row.assigned_box_name or row.return_box or '--' }}</td>
+                <td>{{ row.assigned_position or row.return_position or '--' }}</td>
+                <td>{{ row.thaw_increment or '1' }}</td>
+                <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.errors | join('; ') or '--' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if result %}
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>Commit Result</h2>
+        <p class="muted">{{ result.imported_rows }} imported / {{ result.skipped_rows }} blocked / {{ result.failed_rows }} failed</p>
+      </div>
+    </div>
+    {% if result.batch_id %}
+      <p class="muted">Analysis batch {{ result.batch_id }} was recorded.</p>
+    {% endif %}
+    {% if result.global_errors %}
+      <div class="bulk-errors">
+        {% for error in result.global_errors %}
+          <p class="form-error">{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if result.rows %}
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>Sample</th>
+              <th>Status</th>
+              <th>Return Box</th>
+              <th>Return Pos</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in result.rows %}
+              <tr class="bulk-row-{{ row.status }}">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.sample_id or row.sample_pk or '--' }}</td>
+                <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.assigned_box_name or row.return_box or '--' }}</td>
+                <td>{{ row.assigned_position or row.return_position or '--' }}</td>
+                <td>{{ row.errors | join('; ') or '--' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/analysis-batch.js"></script>
+{% endblock %}

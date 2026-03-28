@@ -1,29 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h1>Storage Browser</h1>
-  <form method="post" action="/storage/node" class="form-inline">
-    <input type="text" name="name" placeholder="Name" required />
-    <select name="node_type">
-      <option value="freezer">Freezer</option>
-      <option value="shelf">Shelf</option>
-      <option value="rack">Rack</option>
-      <option value="box">Box</option>
-    </select>
-    <input type="number" name="parent_id" placeholder="Parent ID (optional)" />
-    <button type="submit">Add Node</button>
-  </form>
-</section>
-<section class="card">
-  <h2>Storage Tree</h2>
-  {% macro render_node(node) %}
-    <li id="node-{{ node.id }}">
-      <strong>{{ node.name }}</strong> ({{ node.node_type.value }})
-      {% if node.node_type.value == 'box' %}
-        <a href="/boxes/{{ node.id }}">Open box</a>
+<section class="card storage-browser" data-storage-browser data-manage-tree="{{ 'true' if has_permission(current_user, 'manage_storage_tree') else 'false' }}">
+  <div class="storage-toolbar">
+    <h1>Storage</h1>
+    <div class="page-actions">
+      {% if has_permission(current_user, 'bulk_import_storage') %}
+        <a class="ghost-button" href="/storage/bulk">Bulk Import</a>
       {% endif %}
+      {% if has_permission(current_user, 'manage_storage_tree') %}
+        <button type="button" class="icon-button toolbar-button" data-action="add-root">+</button>
+      {% endif %}
+    </div>
+  </div>
+  {% macro render_node(node) %}
+    <li
+      id="node-{{ node.id }}"
+      class="storage-node"
+      data-node-id="{{ node.id }}"
+      data-node-type="{{ node.node_type }}"
+      data-node-name="{{ node.name }}"
+      data-node-nickname="{{ node.nickname or '' }}"
+      data-node-notes="{{ node.notes or '' }}"
+      data-node-display-name="{{ node.display_name }}"
+      data-parent-id="{{ node.parent_id or '' }}"
+      data-can-accept-children="{{ 'true' if node.can_accept_children else 'false' }}"
+      data-child-types="{{ node.child_types | join(',') }}"
+    >
+      <div class="storage-row" draggable="{{ 'true' if has_permission(current_user, 'manage_storage_tree') else 'false' }}">
+        {% if node.children %}
+          <button type="button" class="tree-toggle" data-action="toggle" aria-expanded="true">+</button>
+        {% else %}
+          <span class="tree-spacer"></span>
+        {% endif %}
+        {% if node.node_type == 'box' %}
+          <a class="node-link" href="/boxes/{{ node.id }}">{{ node.display_name }}</a>
+        {% else %}
+          <span class="node-label">{{ node.display_name }}</span>
+        {% endif %}
+        {% if has_permission(current_user, 'manage_storage_tree') %}
+          <div class="node-actions">
+            {% if node.can_accept_children %}
+              <button type="button" class="icon-button add-child-button" data-action="add-child">+</button>
+            {% endif %}
+            <button type="button" class="icon-button edit-button" data-action="edit">Edit {{ node.node_type }}</button>
+          </div>
+        {% endif %}
+      </div>
       {% if node.children %}
-        <ul>
+        <ul class="tree-children">
           {% for child in node.children %}
             {{ render_node(child) }}
           {% endfor %}
@@ -31,12 +55,81 @@
       {% endif %}
     </li>
   {% endmacro %}
-  <ul>
+  <ul class="tree-list folder-tree">
     {% for node in root_nodes %}
       {{ render_node(node) }}
     {% else %}
-      <li>No storage nodes yet.</li>
+      <li>No storage configured yet.</li>
     {% endfor %}
   </ul>
 </section>
+
+{% if has_permission(current_user, 'manage_storage_tree') %}
+<dialog id="storage-add-dialog" class="storage-dialog">
+  <form method="dialog" class="storage-dialog-form" id="storage-add-form">
+    <div class="section-head">
+      <h2>Add storage node</h2>
+      <button type="button" class="ghost-button" data-action="close-dialog">Close</button>
+    </div>
+    <input type="hidden" name="parent_id" id="add-parent-id" />
+    <label>Parent
+      <input type="text" id="add-parent-label" readonly />
+    </label>
+    <label>Type
+      <select name="node_type" id="add-node-type"></select>
+    </label>
+    <label>Name
+      <input type="text" name="name" id="add-node-name" required />
+    </label>
+    <label>Nickname
+      <input type="text" name="nickname" id="add-node-nickname" />
+    </label>
+    <label>Notes
+      <textarea name="notes" id="add-node-notes"></textarea>
+    </label>
+    <div id="box-dimensions" class="filter-grid hidden">
+      <label>Rows
+        <input type="number" id="add-box-rows" min="1" />
+      </label>
+      <label>Columns
+        <input type="number" id="add-box-cols" min="1" />
+      </label>
+    </div>
+    <div class="actions-row">
+      <button type="submit">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="storage-edit-dialog" class="storage-dialog">
+  <form method="dialog" class="storage-dialog-form" id="storage-edit-form">
+    <div class="section-head">
+      <h2>Edit storage node</h2>
+      <button type="button" class="ghost-button" data-action="close-dialog">Close</button>
+    </div>
+    <input type="hidden" name="node_id" id="edit-node-id" />
+    <label>Type
+      <input type="text" id="edit-node-type" readonly />
+    </label>
+    <label>Name
+      <input type="text" name="name" id="edit-node-name" required />
+    </label>
+    <label>Nickname
+      <input type="text" name="nickname" id="edit-node-nickname" />
+    </label>
+    <label>Notes
+      <textarea name="notes" id="edit-node-notes"></textarea>
+    </label>
+    <p class="muted" id="edit-node-path"></p>
+    <div class="actions-row storage-dialog-actions">
+      <button type="submit">Save</button>
+      <button type="button" class="ghost-button" id="storage-delete-button">Delete</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/storage-browser.js"></script>
 {% endblock %}

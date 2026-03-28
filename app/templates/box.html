@@ -1,44 +1,142 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h1>{{ box.name }}</h1>
-  <p>Box ID: {{ box.id }}</p>
-  {% if not positions %}
-    <form method="post" action="/storage/box" class="form-inline">
-      <input type="hidden" name="box_id" value="{{ box.id }}" />
-      <input type="number" name="rows" placeholder="Rows" required />
-      <input type="number" name="cols" placeholder="Columns" required />
-      <button type="submit">Generate positions</button>
-    </form>
-  {% endif %}
+  <div class="section-head box-head">
+    <div>
+      <p class="eyebrow">Box View</p>
+      <h1>{{ box.box_name }}</h1>
+      <p class="muted">{{ box.box_path }}</p>
+    </div>
+    {% if box.positions %}
+      <div class="box-view-controls" data-box-controls>
+        <span class="muted">Show</span>
+        <label><input type="checkbox" data-field-toggle="type" checked /> Type</label>
+        <label><input type="checkbox" data-field-toggle="collection" checked /> Collection</label>
+        <label><input type="checkbox" data-field-toggle="visit" checked /> Visit</label>
+        <label><input type="checkbox" data-field-toggle="timepoint" checked /> Timepoint</label>
+        <label><input type="checkbox" data-field-toggle="aliquot" checked /> Aliquot</label>
+        <label class="box-zoom-control">Zoom
+          <input
+            type="range"
+            min="70"
+            max="140"
+            step="5"
+            value="100"
+            data-box-zoom
+            aria-label="Box grid zoom"
+          />
+          <span class="box-zoom-value" data-box-zoom-value>100%</span>
+        </label>
+      </div>
+    {% endif %}
+  </div>
 </section>
+
+{% if not box.positions and can_manage_storage_tree %}
 <section class="card">
-  <h2>Positions</h2>
-  {% if positions %}
-    <div class="grid-box">
-      {% for position in positions %}
-        <div class="grid-cell {% if position.location %}occupied{% endif %}">
-          <div class="label">{{ position.label }}</div>
-          <div class="meta">ID {{ position.id }}</div>
-          {% if position.location %}
-            <div class="meta">Sample {{ position.location.sample.sample_id }}</div>
-          {% else %}
-            <form method="post" action="/boxes/{{ box.id }}/place">
-              <input type="hidden" name="position_id" value="{{ position.id }}" />
-              <select name="sample_id" required>
-                <option value="">Place sample</option>
-                {% for sample in samples %}
-                  <option value="{{ sample.id }}">{{ sample.sample_id }}</option>
-                {% endfor %}
-              </select>
-              <button type="submit">Place</button>
-            </form>
-          {% endif %}
-        </div>
-      {% endfor %}
+  <form method="post" action="/storage/box" class="filter-grid">
+    <input type="hidden" name="box_id" value="{{ box.box_id }}" />
+    <label>Rows
+      <input type="number" name="rows" required />
+    </label>
+    <label>Columns
+      <input type="number" name="cols" required />
+    </label>
+    <button type="submit">Generate positions</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  {% if box.positions %}
+    <div class="box-grid-scroll">
+      <div class="box-grid" style="--box-columns: {{ column_headers | length }};">
+        <div class="box-corner"></div>
+        {% for column in column_headers %}
+          <div class="box-col-head">{{ column }}</div>
+        {% endfor %}
+        {% for grid_row in grid_rows %}
+          <div class="box-row-head">{{ grid_row.row_number }}</div>
+          {% for position in grid_row.cells %}
+            {% if position %}
+              <article class="box-slot {% if position.occupied %}occupied{% else %}empty{% endif %}" data-position-label="{{ position.label }}">
+                {% if position.occupied %}
+                  <div class="box-slot-content">
+                    <div class="box-slot-line box-slot-id">{{ position.sample_identifier }}</div>
+                    <div class="box-slot-line" data-field="type">{{ position.sample_type_name or '--' }}</div>
+                    <div class="box-slot-line" data-field="collection">{{ position.collection_at.strftime('%m/%d/%y') if position.collection_at else '--' }}</div>
+                    <div class="box-slot-line box-slot-meta">
+                      {% if position.visit_label %}
+                        <span data-field="visit">{{ position.visit_label }}</span>
+                      {% endif %}
+                      {% if position.timepoint_label %}
+                        <span data-field="timepoint">{{ position.timepoint_label }}</span>
+                      {% endif %}
+                      {% if position.aliquot_number is not none %}
+                        <span data-field="aliquot">A{{ position.aliquot_number }}</span>
+                      {% endif %}
+                      {% if not position.visit_label and not position.timepoint_label and position.aliquot_number is none %}
+                        <span data-field="visit">--</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% else %}
+                  <button
+                    type="button"
+                    class="slot-add-button"
+                    data-action="open-place"
+                    data-position-id="{{ position.id }}"
+                    data-position-label="{{ position.label }}"
+                    {% if not can_place_move_samples or not samples %}disabled title="{% if not can_place_move_samples %}You do not have permission to place samples{% else %}No unplaced samples available{% endif %}"{% endif %}
+                  >
+                    +
+                  </button>
+                {% endif %}
+              </article>
+            {% else %}
+              <div class="box-slot box-slot-missing"></div>
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </div>
     </div>
   {% else %}
-    <p>No positions yet. Generate positions above.</p>
+    <p class="muted">No positions are configured for this box yet.</p>
   {% endif %}
 </section>
+
+{% if box.positions and can_place_move_samples %}
+  <dialog id="box-place-dialog" class="storage-dialog">
+    <form method="post" action="/boxes/{{ box.box_id }}/place" class="storage-dialog-form" id="box-place-form">
+      <div class="section-head">
+        <h2>Place Sample</h2>
+        <button type="button" class="ghost-button" data-action="close-place-dialog">Close</button>
+      </div>
+      <input type="hidden" name="position_id" id="place-position-id" />
+      <p class="muted" id="place-position-label"></p>
+      <label>Find Sample
+        <input type="search" id="place-sample-search" placeholder="Search by ID, type, visit, or timepoint" />
+      </label>
+      <label>Available Samples
+        <select name="sample_id" id="place-sample-id" size="10" required>
+          {% for sample in samples %}
+            <option
+              value="{{ sample.id }}"
+              data-search="{{ (sample.sample_id ~ ' ' ~ (sample.sample_type_name or '') ~ ' ' ~ (sample.visit_label or '') ~ ' ' ~ (sample.timepoint_label or '') ~ ' ' ~ (sample.study_name or '')) | lower }}"
+            >
+              {{ sample.sample_id }}{% if sample.sample_type_name %} | {{ sample.sample_type_name }}{% endif %}{% if sample.visit_label or sample.timepoint_label or sample.aliquot_number is not none %} | {{ sample.visit_label or '--' }} {{ sample.timepoint_label or '--' }} {% if sample.aliquot_number is not none %}A{{ sample.aliquot_number }}{% endif %}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="actions-row">
+        <button type="submit">Place Sample</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/box-view.js"></script>
 {% endblock %}

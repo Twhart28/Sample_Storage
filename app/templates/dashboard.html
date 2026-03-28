@@ -1,32 +1,71 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h1>Dashboard</h1>
-  <form method="get" action="/samples" class="form-inline">
-    <input type="text" name="q" placeholder="Search samples" />
-    <button type="submit">Search</button>
+<section class="hero card">
+  <div>
+    <p class="eyebrow">Operational Home</p>
+    <h1>Find the sample first. Move through storage second.</h1>
+    <p class="hero-copy">This workspace is organized around registration, lookup, placement, movement, and archive workflows rather than generic maintenance screens.</p>
+  </div>
+  <form method="get" action="/samples" class="search-panel">
+    <label>Global sample search
+      <input type="text" name="q" placeholder="Search by ID, study, visit, timepoint, or notes" />
+    </label>
+    <button type="submit">Search samples</button>
   </form>
 </section>
-<section class="grid">
-  <div class="card">
-    <h2>Status counts</h2>
-    <ul>
-      {% for status, count in status_counts.items() %}
-        <li>{{ status }}: {{ count }}</li>
-      {% else %}
-        <li>No samples yet.</li>
+
+<section class="stats-grid">
+  <article class="stat-card">
+    <span>Total samples</span>
+    <strong>{{ total_samples }}</strong>
+  </article>
+  <article class="stat-card">
+    <span>Unplaced samples</span>
+    <strong>{{ unplaced_count }}</strong>
+  </article>
+  {% for freezer, count in freezer_counts.items() %}
+    <article class="stat-card accent">
+      <span>{{ freezer }}</span>
+      <strong>{{ count }} occupied</strong>
+    </article>
+  {% endfor %}
+</section>
+
+<section class="split-grid">
+  <article class="card">
+    <div class="section-head">
+      <h2>Study Roles</h2>
+      <a href="/samples">Open queue</a>
+    </div>
+    <ul class="metric-list">
+      {% for study_role, count in study_role_counts.items() %}
+        <li><span>Role: {{ study_role }}</span><strong>{{ count }}</strong></li>
       {% endfor %}
+      {% if not study_role_counts %}
+        <li><span>No samples yet</span><strong>0</strong></li>
+      {% endif %}
     </ul>
-  </div>
-  <div class="card">
-    <h2>Freezer occupancy</h2>
-    <ul>
-      {% for freezer, count in freezer_counts.items() %}
-        <li>{{ freezer }}: {{ count }}</li>
+  </article>
+  <article class="card">
+    <div class="section-head">
+      <h2>Recent samples</h2>
+      <a href="/samples/new">Register sample</a>
+    </div>
+    <div class="stack-list">
+      {% for sample in recent_samples %}
+        <a class="stack-row" href="/samples/{{ sample.id }}">
+          <span>
+            <strong>{{ sample.sample_id }}</strong>
+          </span>
+          <span>
+            <em>{{ sample.study_role.title() }}</em>
+            <small>{{ sample.location_label or 'Unplaced' }}</small>
+          </span>
+        </a>
       {% else %}
-        <li>No occupied positions yet.</li>
+        <p class="muted">No sample activity yet.</p>
       {% endfor %}
-    </ul>
-  </div>
+    </div>
+  </article>
 </section>
 {% endblock %}

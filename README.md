@@ -1,21 +1,21 @@
-# Freezer Sample Tracker (MVP)
+# Freezer Sample Tracker
 
-A minimal LabKey-inspired sample tracking and freezer management web app built with FastAPI, SQLAlchemy, SQLite, Jinja2, and HTMX.
+A search-first internal sample tracking and freezer workflow app built with FastAPI, SQLAlchemy, SQLite, Jinja2, and Alembic.
 
-## Features
-- Register samples and sample types
-- Model freezer hierarchy (Freezer → Shelf → Rack → Box)
-- Auto-generate box positions
-- Place/move samples with audit events
-- Search/filter/sort samples
-- Immutable event feed
+## Current Focus
+- Register and update samples with typed metadata and custom-field JSON
+- Search samples by identifier, status, type, and placement state
+- Place, move, retrieve, and archive samples with append-only event history
+- Browse storage as supporting context rather than the primary workflow
+- Expose matching HTML and `/api` endpoints for the core operations
+- Support simple `staff` and `admin` roles for internal use
 
 ## Tech Stack
 - Python 3.12+
 - FastAPI
 - SQLAlchemy 2.x
-- SQLite (default)
-- Jinja2 templates + HTMX
+- SQLite for local development
+- Jinja2 templates
 - Alembic migrations
 - Pydantic models
 
@@ -23,7 +23,7 @@ A minimal LabKey-inspired sample tracking and freezer management web app built w
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install fastapi uvicorn itsdangerous sqlalchemy alembic jinja2 python-multipart
+pip install fastapi uvicorn itsdangerous sqlalchemy alembic jinja2 python-multipart httpx openpyxl
 ```
 
 ## Initialize the Database
@@ -36,32 +36,39 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Open `http://localhost:8000`.
+Open [http://localhost:8000](http://localhost:8000).
 
-## Seed Demo Storage
-- Visit `/login` and click **Seed demo storage**, or
-- `POST /admin/seed` after logging in.
+## Access and Seeding
+- Visit `/login`
+- Choose `staff` or `admin`
+- Admin users can open `/admin/configuration` to create sample types or seed demo storage
 
 ## Project Layout
-```
+```text
 app/
-  main.py
+  api/
+    routes/
+  domain/
+  repositories/
+  services/
+  web/
+    routes/
   db.py
+  main.py
   models.py
   schemas.py
-  crud.py
-  routes/
-    auth.py
-    samples.py
-    storage.py
-    events.py
-  templates/
   static/
+  templates/
 
 alembic/
   versions/
+
+tests/
 ```
 
 ## Notes
-- Events are append-only; no delete routes are provided.
-- Sample placement enforces one sample per position and one location per sample.
+- `app/models.py` is now a compatibility export of `app/domain/models.py`
+- HTML routes live under `app/web/routes`, JSON routes under `app/api/routes`
+- Events remain append-only; retrieval and archival are recorded as status transitions
+- Local tests use temporary SQLite databases rather than the checked-in `freezer.db`
+- Bulk sample import supports an Excel template with header comments and `.xlsx` upload

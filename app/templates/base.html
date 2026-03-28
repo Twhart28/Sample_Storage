@@ -3,23 +3,44 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Freezer Sample Tracker</title>
+  <title>Sample Storage Workspace</title>
   <link rel="stylesheet" href="/static/styles.css" />
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="logo">Freezer Sample Tracker</div>
-    <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/samples">Samples</a>
-      <a href="/storage">Storage</a>
-      <a href="/events">Events</a>
-      <a href="/login">Login</a>
-    </nav>
-  </header>
-  <main class="container">
-    {% block content %}{% endblock %}
-  </main>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/dashboard">
+        <span class="brand-mark">SS</span>
+        <span>
+          <strong>Sample Storage</strong>
+          <small>Search-first freezer operations</small>
+        </span>
+      </a>
+      <nav class="topnav">
+        <a href="/dashboard">Home</a>
+        <a href="/samples">Samples</a>
+        <a href="/storage">Storage</a>
+        <a href="/events">Activity</a>
+        {% if current_user %}
+          <a href="/settings">Settings</a>
+        {% endif %}
+      </nav>
+      <div class="userpanel">
+        {% if current_user %}
+          <div>
+            <strong>{{ current_user.username }}</strong>
+            <small>{{ current_user.role.value }}</small>
+          </div>
+          <a class="ghost-button" href="/logout">Logout</a>
+        {% else %}
+          <a class="ghost-button" href="/login">Login</a>
+        {% endif %}
+      </div>
+    </header>
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
