@@ -24,12 +24,15 @@ router = APIRouter()
 @router.get("/storage")
 async def storage_browser(request: Request, db: Session = Depends(get_db)):
     current_user = get_current_user(request, db)
+    search_query = str(request.query_params.get("q") or "").strip()
     return templates.TemplateResponse(
         "storage.html",
         {
             "request": request,
             "current_user": current_user,
             "root_nodes": storage_service.list_storage_tree(db),
+            "search_query": search_query,
+            "search_results": storage_service.search_boxes(db, search_query) if search_query else [],
         },
     )
 
@@ -122,7 +125,7 @@ async def create_storage_node(
             db,
             StorageNodeCreate(
                 name=form.get("name", "").strip(),
-                nickname=form.get("nickname") or None,
+                notes=form.get("notes") or None,
                 node_type=form.get("node_type") or "freezer",
                 parent_id=int(form.get("parent_id")) if form.get("parent_id") else None,
             ),

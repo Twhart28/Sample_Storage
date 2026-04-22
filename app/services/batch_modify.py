@@ -29,6 +29,8 @@ LOOKUP_SHEET_NAME = "_lists"
 TABLE_HEADER_ROW = 1
 DATA_START_ROW = 2
 ENTRY_ROWS = 500
+HEMOLYSIS_ALLOWED_VALUES = [f"{value:g}" for value in [1 + (index * 0.5) for index in range(13)]]
+HEMOLYSIS_VALIDATION_FORMULA = '"' + ",".join(HEMOLYSIS_ALLOWED_VALUES) + '"'
 HEADERS = [
     "sample_pk",
     "sample_id",
@@ -78,7 +80,7 @@ HEADER_COMMENTS = {
     "visit": "Editable target visit. Use numbers only. Blank clears the field.",
     "timepoint": "Editable target timepoint. Use numbers only. Blank clears the field.",
     "aliquot": "Editable target aliquot. Blank clears the field.",
-    "hemolysis": "Editable target hemolysis from 0 to 6. Blank clears the field.",
+    "hemolysis": "Editable target hemolysis from 1 to 7 in 0.5 increments. Blank clears the field.",
     "volume": "Editable target volume. Blank clears the field.",
     "thaw_count": "Editable target thaw count. This field cannot be blank.",
     "notes": "Editable target note text. Blank clears the field.",
@@ -181,8 +183,8 @@ def generate_modify_log_xlsx(db: Session, sample_ids: list[int]) -> bytes:
     sheet.add_data_validation(study_role_validation)
     study_role_validation.add(f"Q{DATA_START_ROW}:Q{ENTRY_ROWS}")
 
-    hemolysis_validation = DataValidation(type="whole", operator="between", formula1="0", formula2="6", allow_blank=True)
-    hemolysis_validation.error = "Use a whole number from 0 to 6."
+    hemolysis_validation = DataValidation(type="list", formula1=HEMOLYSIS_VALIDATION_FORMULA, allow_blank=True)
+    hemolysis_validation.error = "Use a hemolysis value from 1 to 7 in 0.5 increments."
     sheet.add_data_validation(hemolysis_validation)
     hemolysis_validation.add(f"U{DATA_START_ROW}:U{ENTRY_ROWS}")
 
@@ -201,7 +203,7 @@ def generate_modify_log_xlsx(db: Session, sample_ids: list[int]) -> bytes:
             sample.visit_label or "",
             sample.timepoint_label or "",
             "" if sample.aliquot_number is None else sample.aliquot_number,
-            "" if sample.hemolysis_classification is None else sample.hemolysis_classification,
+            _display_hemolysis(sample.hemolysis_classification),
             "" if sample.volume is None else sample.volume,
             sample.volume_units or "mL",
             sample.thaw_count,
@@ -213,7 +215,7 @@ def generate_modify_log_xlsx(db: Session, sample_ids: list[int]) -> bytes:
             sample.visit_label or "",
             sample.timepoint_label or "",
             "" if sample.aliquot_number is None else sample.aliquot_number,
-            "" if sample.hemolysis_classification is None else sample.hemolysis_classification,
+            _display_hemolysis(sample.hemolysis_classification),
             "" if sample.volume is None else sample.volume,
             sample.thaw_count,
             sample.notes or "",
@@ -425,7 +427,7 @@ def _validate_row(
         row.errors.append("Current timepoint does not match the current record")
     if row.current_aliquot and row.current_aliquot != ("" if sample.aliquot_number is None else str(sample.aliquot_number)):
         row.errors.append("Current aliquot does not match the current record")
-    if row.current_hemolysis and row.current_hemolysis != ("" if sample.hemolysis_classification is None else str(sample.hemolysis_classification)):
+    if row.current_hemolysis and row.current_hemolysis != _display_hemolysis(sample.hemolysis_classification):
         row.errors.append("Current hemolysis does not match the current record")
     if row.current_volume and not _volumes_match(row.current_volume, sample.volume):
         row.errors.append("Current volume does not match the current record")
@@ -456,7 +458,7 @@ def _validate_row(
         row.timepoint = timepoint_label or None
         row.study_role = study_role
         row.aliquot = None if aliquot_number is None else str(aliquot_number)
-        row.hemolysis = None if hemolysis is None else str(hemolysis)
+        row.hemolysis = _display_hemolysis(hemolysis) or None
         row.volume = None if volume is None else f"{volume:g}"
         row.thaw_count = str(thaw_count)
         row.notes = notes
@@ -536,7 +538,7 @@ def _preview_to_modify_plans(db: Session, preview: BatchModifyImportPreview) -> 
                     visit_label=_clean_text(row.visit),
                     timepoint_label=_clean_text(row.timepoint),
                     aliquot_number=_parse_int(row.aliquot),
-                    hemolysis_classification=_parse_int(row.hemolysis),
+                    hemolysis_classification=_parse_float(row.hemolysis),
                     volume=_parse_float(row.volume),
                     thaw_count=_parse_int(row.thaw_count),
                     notes=_clean_text(row.notes),
@@ -617,13 +619,13 @@ def _parse_required_int(value: str | None, label: str, errors: list[str]) -> int
     return parsed
 
 
-def _parse_optional_hemolysis(value: str | None, errors: list[str]) -> int | None:
+def _parse_optional_hemolysis(value: str | None, errors: list[str]) -> float | None:
     cleaned = _clean_text(value)
     if cleaned is None:
         return None
-    parsed = _parse_int(cleaned)
+    parsed = _parse_float(cleaned)
     if parsed is None:
-        errors.append("Hemolysis must be a whole number from 0 to 6")
+        errors.append("Hemolysis must be between 1 and 7 in 0.5 increments")
         return None
     try:
         return sample_service._normalize_hemolysis(parsed)
@@ -659,6 +661,12 @@ def _parse_optional_datetime(value: str | None, label: str, errors: list[str]) -
 def _display_optional(value: str | None) -> str | None:
     cleaned = _clean_text(value)
     return cleaned
+
+
+def _display_hemolysis(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:g}"
 
 
 def _display_collection(value: datetime | None) -> str | None:

@@ -14,7 +14,7 @@ from app.api.routes import analyses as api_analyses
 from app.api.routes import samples as api_samples
 from app.api.routes import storage as api_storage
 from app.domain.models import Base
-from app.web.routes import admin, analyses, auth, dashboard, events, samples, settings, storage
+from app.web.routes import admin, analyses, auth, dashboard, events, samples, settings, storage, visit_workflows
 
 
 def _ensure_schema_compatibility() -> None:
@@ -71,6 +71,13 @@ def _ensure_schema_compatibility() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_samples_is_archived ON samples (is_archived)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_samples_is_out_for_analysis ON samples (is_out_for_analysis)"))
 
+        if "study_workflows" in table_names:
+            workflow_columns = {column["name"] for column in inspect(conn).get_columns("study_workflows")}
+            if "template_workbook_filename" not in workflow_columns:
+                conn.execute(text("ALTER TABLE study_workflows ADD COLUMN template_workbook_filename VARCHAR(255)"))
+            if "template_workbook_blob" not in workflow_columns:
+                conn.execute(text("ALTER TABLE study_workflows ADD COLUMN template_workbook_blob BLOB"))
+
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Freezer Sample Tracker")
@@ -90,6 +97,7 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(settings.router)
     app.include_router(admin.router)
+    app.include_router(visit_workflows.router)
 
     app.include_router(api_samples.router)
     app.include_router(api_analyses.router)

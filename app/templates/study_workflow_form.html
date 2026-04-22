@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Study Workflow</p>
+    <h1>{{ study.name }}</h1>
+    <p class="muted">Configure the workflow label, quick links, and visit template workbook for this study.</p>
+  </div>
+  <div class="page-actions">
+    <a class="ghost-button" href="/settings/studies">Back to studies</a>
+  </div>
+</section>
+
+{% if saved %}
+  <p class="muted">Workflow settings saved.</p>
+{% endif %}
+{% if error_message %}
+  <p class="form-error">{{ error_message }}</p>
+{% endif %}
+
+<section class="card">
+  <form method="post" action="/settings/studies/{{ study.id }}/workflow" enctype="multipart/form-data" class="stack-form compact-form" id="study-workflow-form">
+    <label>Workflow label
+      <input type="text" name="label" value="{{ values.label }}" required />
+    </label>
+    <label>Description
+      <textarea name="description">{{ values.description }}</textarea>
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="is_active" {% if values.is_active %}checked{% endif %} />
+      <span>Workflow is active and available to operators</span>
+    </label>
+
+    <div class="workflow-settings-block">
+      <div class="section-head">
+        <h2>Quick Links</h2>
+        <button type="button" class="ghost-button" id="add-quick-link">Add quick link</button>
+      </div>
+      <p class="muted">Add as many quick links as needed. Users will click the title and the link will open in a new browser tab.</p>
+      <div id="quick-link-list" class="workflow-link-list">
+        {% for link in values.quick_links %}
+          <div class="workflow-link-row">
+            <label>Title
+              <input type="text" name="quick_link_label" value="{{ link.label }}" />
+            </label>
+            <label>URL
+              <input type="url" name="quick_link_url" value="{{ link.url }}" />
+            </label>
+            <button type="button" class="ghost-button workflow-link-remove" {% if values.quick_links|length == 1 %}disabled{% endif %}>Remove</button>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="workflow-settings-block">
+      <h2>Visit Template</h2>
+      <p class="muted">Upload the Excel workbook used for this study workflow. The workbook can include any additional sheets you want, but it must contain a sheet named <code>sample_Import</code>. That sheet must use the same columns and format as the built-in bulk sample upload template. The workflow ignores all other sheets when importing samples.</p>
+      <p class="muted">Current template: {{ workflow.template_workbook_filename or 'Using the default bulk sample import template.' }}</p>
+      <label>Upload or replace visit template
+        <input type="file" name="visit_template_file" accept=".xlsx" />
+      </label>
+    </div>
+
+    <div class="actions-row">
+      <button type="submit">Save workflow</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/visit-workflow-form.js"></script>
+{% endblock %}

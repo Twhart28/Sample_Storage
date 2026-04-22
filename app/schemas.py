@@ -52,6 +52,144 @@ class StudyRead(StudyBase, OrmModel):
     display_name: str
 
 
+class StudyWorkflowQuickLink(BaseModel):
+    key: str
+    label: str
+    url: str
+
+
+class StudyWorkflowQuickLinkInput(BaseModel):
+    label: str
+    url: str
+
+
+class StudyWorkflowSummarySection(BaseModel):
+    title: str
+    body: str | None = None
+
+
+class StudyWorkflowTemplateConfig(BaseModel):
+    instructions: str | None = None
+    default_visit_label: str | None = None
+    default_timepoint_label: str | None = None
+    default_study_role: Literal["current", "retired"] = "current"
+    default_volume_units: str = "mL"
+    prefill_box: str | None = None
+
+
+class StudyWorkflowConfigInput(BaseModel):
+    label: str
+    description: str | None = None
+    is_active: bool = False
+    quick_links: list[StudyWorkflowQuickLinkInput] = Field(default_factory=list)
+
+
+class StudyWorkflowView(OrmModel):
+    id: int
+    study_id: int
+    study_name: str
+    label: str
+    description: str | None = None
+    is_active: bool = False
+    quick_links: list[StudyWorkflowQuickLink] = Field(default_factory=list)
+    sample_template_config: StudyWorkflowTemplateConfig = Field(default_factory=StudyWorkflowTemplateConfig)
+    summary_sections: list[StudyWorkflowSummarySection] = Field(default_factory=list)
+    template_workbook_filename: str | None = None
+    has_template_workbook: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class VisitSessionCreateInput(BaseModel):
+    study_id: int
+    participant_id: str
+    visit_date: datetime
+
+
+class VisitSessionNotesInput(BaseModel):
+    notes: str | None = None
+
+
+class VisitSessionCompleteInput(BaseModel):
+    completion_note: str | None = None
+
+
+class VisitSessionSampleLink(OrmModel):
+    id: int
+    sample_id: int
+    created_at: datetime
+    sample_identifier: str | None = None
+    sample_type_name: str | None = None
+    location_label: str | None = None
+    detail_url: str | None = None
+
+
+class VisitSessionView(OrmModel):
+    id: int
+    study_id: int
+    study_name: str
+    workflow_id: int
+    workflow_label: str
+    workflow_description: str | None = None
+    participant_id: str
+    visit_date: datetime
+    operator_user_id: int | None = None
+    operator_name: str | None = None
+    status: str
+    session_notes: str | None = None
+    deviation_notes: str | None = None
+    completion_note: str | None = None
+    generated_workbook_filename: str | None = None
+    uploaded_workbook_filename: str | None = None
+    step_status: dict[str, str] = Field(default_factory=dict)
+    imported_rows: int = 0
+    skipped_rows: int = 0
+    failed_rows: int = 0
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    quick_links: list[StudyWorkflowQuickLink] = Field(default_factory=list)
+    summary_sections: list[StudyWorkflowSummarySection] = Field(default_factory=list)
+    created_samples: list[VisitSessionSampleLink] = Field(default_factory=list)
+
+
+class VisitWorkflowListItem(BaseModel):
+    study_id: int
+    study_name: str
+    workflow_id: int
+    label: str
+    description: str | None = None
+    is_active: bool = False
+
+
+class VisitWorkbookHeader(BaseModel):
+    visit_session_id: int
+    study_name: str
+    participant_id: str
+    visit_date: str
+    operator_name: str | None = None
+
+
+class VisitWorkbookNotes(BaseModel):
+    session_notes: str | None = None
+    deviation_notes: str | None = None
+
+
+class VisitWorkbookPreview(BaseModel):
+    session: VisitSessionView
+    raw_payload: str
+    uploaded_filename: str | None = None
+    sample_preview: "BulkSampleImportPreview"
+
+
+class VisitWorkbookCommitResult(BaseModel):
+    session: VisitSessionView
+    imported_rows: int = 0
+    skipped_rows: int = 0
+    failed_rows: int = 0
+    global_errors: list[str] = Field(default_factory=list)
+
+
 class SampleSearchQuery(BaseModel):
     q: str = ""
     sample_type_id: int | None = None
@@ -73,9 +211,9 @@ class SampleSearchQuery(BaseModel):
     aliquot_number: int | None = None
     aliquot_min: int | None = None
     aliquot_max: int | None = None
-    hemolysis_classification: int | None = None
-    hemolysis_min: int | None = None
-    hemolysis_max: int | None = None
+    hemolysis_classification: float | None = None
+    hemolysis_min: float | None = None
+    hemolysis_max: float | None = None
     thaw_count_min: int | None = None
     thaw_count_max: int | None = None
     volume_min: float | None = None
@@ -115,7 +253,7 @@ class SampleCreateInput(BaseModel):
     visit_label: str | None = None
     timepoint_label: str | None = None
     aliquot_number: int | None = None
-    hemolysis_classification: int | None = None
+    hemolysis_classification: float | None = None
     study_role: Literal["current", "retired"] = "current"
     volume: float | None = None
     volume_units: str | None = "mL"
@@ -130,7 +268,7 @@ class SampleUpdateInput(BaseModel):
     visit_label: str | None = None
     timepoint_label: str | None = None
     aliquot_number: int | None = None
-    hemolysis_classification: int | None = None
+    hemolysis_classification: float | None = None
     study_role: Literal["current", "retired"] | None = None
     volume: float | None = None
     volume_units: str | None = None
@@ -176,7 +314,7 @@ class SampleListItem(OrmModel):
     visit_label: str | None = None
     timepoint_label: str | None = None
     aliquot_number: int | None = None
-    hemolysis_classification: int | None = None
+    hemolysis_classification: float | None = None
     location_label: str | None = None
     location_path: str | None = None
     location_position_id: int | None = None
@@ -449,7 +587,7 @@ class SampleDetailView(OrmModel):
     visit_label: str | None = None
     timepoint_label: str | None = None
     aliquot_number: int | None = None
-    hemolysis_classification: int | None = None
+    hemolysis_classification: float | None = None
     collection_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -479,7 +617,6 @@ class SampleFilterOptionsResponse(BaseModel):
 
 class StorageNodeCreate(BaseModel):
     name: str
-    nickname: str | None = None
     notes: str | None = None
     node_type: Literal["freezer", "shelf", "rack", "box"]
     parent_id: int | None = None
@@ -487,11 +624,15 @@ class StorageNodeCreate(BaseModel):
 
 class StorageNodeUpdate(BaseModel):
     name: str
-    nickname: str | None = None
     notes: str | None = None
 
 
 class StorageNodeMoveInput(BaseModel):
+    parent_id: int | None = None
+
+
+class StorageNodeBatchMoveInput(BaseModel):
+    node_ids: list[int] = Field(default_factory=list)
     parent_id: int | None = None
 
 
@@ -504,12 +645,14 @@ class BoxCreateInput(BaseModel):
 class StorageNodeView(OrmModel):
     id: int
     name: str
-    nickname: str | None = None
     notes: str | None = None
     display_name: str
+    path: str
     node_type: str
     parent_id: int | None = None
     can_accept_children: bool
+    filled_positions: int = 0
+    total_positions: int = 0
     child_types: list[str] = Field(default_factory=list)
     children: list["StorageNodeView"] = Field(default_factory=list)
 
@@ -555,6 +698,9 @@ class BulkSampleImportRow(BaseModel):
     box: str | None = None
     assigned_box_name: str | None = None
     position: str | None = None
+    placement_mode: str | None = None
+    placement_group: str | None = None
+    placement_offset: str | None = None
     assigned_position: str | None = None
     errors: list[str] = Field(default_factory=list)
     valid: bool = False
@@ -592,7 +738,6 @@ class BulkBoxImportRow(BaseModel):
     box: str | None = None
     rows: str | None = None
     cols: str | None = None
-    box_nickname: str | None = None
     notes: str | None = None
     errors: list[str] = Field(default_factory=list)
     valid: bool = False
@@ -628,3 +773,4 @@ class ExportBundle(BaseModel):
 
 
 StorageNodeView.model_rebuild()
+VisitWorkbookPreview.model_rebuild()

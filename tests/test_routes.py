@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
+
+from openpyxl import load_workbook
 
 try:
     from fastapi.testclient import TestClient
@@ -21,6 +24,7 @@ from app.schemas import (
     SampleCreateInput,
     SampleTypeCreate,
     StorageNodeCreate,
+    StudyWorkflowConfigInput,
     StudyCreate,
 )
 from app.services import admin as admin_service
@@ -29,6 +33,7 @@ from app.services import auth as auth_service
 from app.services import batch_modify as batch_modify_service
 from app.services import samples as sample_service
 from app.services import storage as storage_service
+from app.services import visit_workflows as visit_service
 
 
 @unittest.skipIf(TestClient is None, "fastapi testclient dependencies are not installed")
@@ -335,6 +340,121 @@ class RouteWorkflowTests(unittest.TestCase):
         self.assertEqual(updated.json()["study_role"], "current")
         self.assertEqual(updated.json()["custody_label"], "in storage")
         self.assertEqual(updated.json()["usage_label"], "unused")
+
+    def test_dashboard_and_visit_workflow_pages_render(self):
+        self.client.post(
+            "/login",
+            data={"username": "admin", "full_name": "Admin User"},
+        )
+        session = db.SessionLocal()
+        try:
+            admin_user = auth_service.sync_user(session, "admin", "Admin User")
+            study = admin_service.create_study(session, StudyCreate(name="Visit Study"))
+            visit_service.save_workflow_config(
+                session,
+                study.id,
+                StudyWorkflowConfigInput(
+                    label="Visit Workflow",
+                    description="Visit execution",
+                    is_active=True,
+                    quick_links=[
+                        {"label": "Biochem / Lipid Results", "url": "https://example.com/biochem.xlsx"},
+                        {"label": "Dilution Calculator", "url": "https://example.com/dilution.xlsx"},
+                    ],
+                ),
+            )
+        finally:
+            session.close()
+
+        dashboard = self.client.get("/dashboard")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "Study Workflows")
+        self.assertContains(dashboard, "Start visit workflow")
+
+        workspace = self.client.get("/visit-workflows")
+        self.assertEqual(workspace.status_code, 200)
+        self.assertContains(workspace, "Visit Execution")
+        self.assertContains(workspace, "Visit Study")
+
+    def test_visit_workflow_start_preview_commit_and_summary(self):
+        self.client.post(
+            "/login",
+            data={"username": "admin", "full_name": "Admin User"},
+        )
+        session = db.SessionLocal()
+        try:
+            admin_user = auth_service.sync_user(session, "admin", "Admin User")
+            study = admin_service.create_study(session, StudyCreate(name="Visit Study"))
+            sample_type = admin_service.create_sample_type(session, SampleTypeCreate(name="Plasma", description="Plasma"))
+            freezer = storage_service.create_storage_node(session, StorageNodeCreate(name="Visit Freezer", node_type="freezer"), admin_user)
+            shelf = storage_service.create_storage_node(session, StorageNodeCreate(name="Visit Shelf", node_type="shelf", parent_id=freezer.id), admin_user)
+            rack = storage_service.create_storage_node(session, StorageNodeCreate(name="Visit Rack", node_type="rack", parent_id=shelf.id), admin_user)
+            box = storage_service.create_storage_node(session, StorageNodeCreate(name="Visit Box", node_type="box", parent_id=rack.id), admin_user)
+            storage_service.create_box_positions(session, BoxCreateInput(box_id=box.id, rows=2, cols=2), admin_user)
+            self.assertIsNotNone(sample_type)
+            visit_service.save_workflow_config(
+                session,
+                study.id,
+                StudyWorkflowConfigInput(
+                    label="Visit Workflow",
+                    description="Visit execution",
+                    is_active=True,
+                    quick_links=[
+                        {"label": "Biochem / Lipid Results", "url": "https://example.com/biochem.xlsx"},
+                        {"label": "Dilution Calculator", "url": "https://example.com/dilution.xlsx"},
+                    ],
+                ),
+            )
+        finally:
+            session.close()
+
+        started = self.client.post(
+            "/visit-workflows",
+            data={"study_id": "1", "participant_id": "PT-ROUTE-1", "visit_date": "2026-03-28T09:00"},
+            follow_redirects=False,
+        )
+        self.assertEqual(started.status_code, 303)
+        session_url = started.headers["location"]
+
+        detail = self.client.get(session_url)
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Download visit template")
+        self.assertContains(detail, "Biochem / Lipid Results")
+
+        workbook = self.client.get(f"{session_url}/template")
+        self.assertEqual(workbook.status_code, 200)
+        modified = load_workbook(filename=BytesIO(workbook.content))
+        modified["sample_Import"]["A2"] = "VR-001"
+        modified["sample_Import"]["B2"] = "Plasma"
+        modified["sample_Import"]["F2"] = 1
+        modified["sample_Import"]["I2"] = 1.0
+        modified["sample_Import"]["K2"] = 0
+        modified["sample_Import"]["M2"] = "03/28/26 09:10"
+        modified["sample_Import"]["N2"] = "Visit Box"
+        modified["sample_Import"]["O2"] = "A1"
+        buffer = BytesIO()
+        modified.save(buffer)
+
+        preview = self.client.post(
+            f"{session_url}/preview",
+            files={"visit_file": ("visit-session.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, "Preview")
+        self.assertContains(preview, "VR-001")
+
+        raw_payload = visit_service.visit_workbook_to_payload(buffer.getvalue(), uploaded_filename="visit-session.xlsx")
+        commit = self.client.post(
+            f"{session_url}/commit",
+            data={"raw_payload": raw_payload, "uploaded_filename": "visit-session.xlsx"},
+        )
+        self.assertEqual(commit.status_code, 200)
+        self.assertContains(commit, "Commit Result")
+
+        summary = self.client.get(f"{session_url}/summary")
+        self.assertEqual(summary.status_code, 200)
+        self.assertContains(summary, "Visit Summary")
+        self.assertContains(summary, "VR-001")
 
     def test_user_without_process_analysis_permission_is_blocked(self):
         self.client.post(

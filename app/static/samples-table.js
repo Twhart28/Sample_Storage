@@ -24,12 +24,22 @@
   const selectionRemoveButton = document.getElementById("samples-analysis-remove");
   const selectionWorkspaceLink = document.getElementById("samples-analysis-start");
   const selectionClearButton = document.getElementById("samples-analysis-clear");
+  const bulkOpenButton = document.getElementById("samples-bulk-open");
+  const bulkDialog = document.getElementById("samples-bulk-dialog");
+  const bulkCloseButton = document.getElementById("samples-bulk-close");
+  const bulkFileInput = document.getElementById("samples-bulk-file");
+  const bulkErrorBox = document.getElementById("samples-bulk-error");
+  const bulkStatusBox = document.getElementById("samples-bulk-status");
+  const bulkPreviewBox = document.getElementById("samples-bulk-preview");
+  const bulkResetButton = document.getElementById("samples-bulk-reset");
+  const bulkCommitButton = document.getElementById("samples-bulk-commit");
 
   const visibleColumnsStorageKey = "samples-table-visible-columns";
   const sampleActionSelection = window.SampleActionSelection || null;
   const canUseSampleActions = !!bootstrap.can_use_sample_actions && !!sampleActionSelection;
   const sampleActionsWorkspaceUrl = bootstrap.sample_actions_workspace_url || "/sample-actions";
   const sampleActionsStorageKey = bootstrap.sample_actions_storage_key || "sample-action-selection";
+  const canBulkImportSamples = !!bulkOpenButton && !!bulkDialog;
   const optionColumns = new Set(["study", "sample_type", "study_role", "custody", "usage", "visit_label", "timepoint_label"]);
   const numberRangeColumns = new Set(["volume", "aliquot_number", "hemolysis_classification", "thaw_count"]);
   const dateRangeColumns = new Set(["collection_at", "created_at", "updated_at"]);
@@ -110,6 +120,8 @@
   let debounceTimer = null;
   let fetchVersion = 0;
   let selectionMode = false;
+  let bulkPreviewPayload = null;
+  let lastSelectedRowId = null;
   const checkedRowIds = new Set();
 
   indexLocationTree(storageTree);
@@ -120,6 +132,7 @@
       selectionMode = !selectionMode;
       if (!selectionMode) {
         checkedRowIds.clear();
+        lastSelectedRowId = null;
       }
       renderTable();
     });
@@ -130,6 +143,7 @@
       }
       sampleActionSelection.add(sampleIds, sampleActionsStorageKey);
       sampleIds.forEach((sampleId) => checkedRowIds.delete(sampleId));
+      lastSelectedRowId = null;
       renderTable();
     });
     selectionRemoveButton?.addEventListener("click", () => {
@@ -139,11 +153,13 @@
       }
       sampleActionSelection.remove(sampleIds, sampleActionsStorageKey);
       sampleIds.forEach((sampleId) => checkedRowIds.delete(sampleId));
+      lastSelectedRowId = null;
       renderTable();
     });
     selectionClearButton?.addEventListener("click", () => {
       sampleActionSelection.clear(sampleActionsStorageKey);
       checkedRowIds.clear();
+      lastSelectedRowId = null;
       renderTable();
     });
     selectionWorkspaceLink?.addEventListener("click", (event) => {
@@ -151,6 +167,26 @@
         event.preventDefault();
       }
     });
+  }
+
+  if (canBulkImportSamples) {
+    bulkOpenButton?.addEventListener("click", openBulkDialog);
+    bulkCloseButton?.addEventListener("click", closeBulkDialog);
+    bulkResetButton?.addEventListener("click", resetBulkDialog);
+    bulkFileInput?.addEventListener("change", handleBulkFileSelected);
+    bulkCommitButton?.addEventListener("click", commitBulkImport);
+    bulkDialog?.addEventListener("click", (event) => {
+      const rect = bulkDialog.getBoundingClientRect();
+      const clickedBackdrop =
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom;
+      if (clickedBackdrop) {
+        closeBulkDialog();
+      }
+    });
+    bulkDialog?.addEventListener("close", resetBulkDialog);
   }
 
   searchInput.value = state.q || "";
@@ -602,6 +638,9 @@
         checkedRowIds.delete(sampleId);
       }
     });
+    if (lastSelectedRowId !== null && !visibleRowIds.has(lastSelectedRowId)) {
+      lastSelectedRowId = null;
+    }
     const visibleColumns = (state.visible_columns || []).filter((key) => columnMap.has(key));
     renderColumnGroup(visibleColumns);
     thead.innerHTML = `
@@ -638,8 +677,15 @@
     tbody.innerHTML = rows
       .map((row) => {
         const inSelection = canUseSampleActions && sampleActionSelection.load(sampleActionsStorageKey).includes(row.id);
+        const rowClasses = [];
+        if (canUseSampleActions && selectionMode && inSelection) {
+          rowClasses.push("sample-row--analysis");
+        }
+        if (canUseSampleActions && selectionMode && checkedRowIds.has(row.id)) {
+          rowClasses.push("sample-row--selected");
+        }
         return `
-          <tr class="${canUseSampleActions && selectionMode && inSelection ? "sample-row--analysis" : ""}">
+          <tr data-sample-row-id="${row.id}" class="${rowClasses.join(" ")}">
             ${canUseSampleActions && selectionMode ? `<td class="sample-col sample-col--analysis sample-col--cell">${renderSelectionCell(row, inSelection)}</td>` : ""}
             ${visibleColumns.map((key) => `<td class="${getColumnClassName(key, "cell")}">${renderCell(row, key)}</td>`).join("")}
           </tr>
@@ -683,18 +729,27 @@
     if (!canUseSampleActions || !selectionMode) {
       return;
     }
+    tbody.querySelectorAll("tr[data-sample-row-id]").forEach((rowElement) => {
+      rowElement.addEventListener("click", (event) => {
+        if (event.target.closest("a, button, input")) {
+          return;
+        }
+        const sampleId = Number.parseInt(rowElement.dataset.sampleRowId || "", 10);
+        if (!Number.isInteger(sampleId)) {
+          return;
+        }
+        handleSelectionInteraction(sampleId, event);
+      });
+    });
     tbody.querySelectorAll("[data-analysis-row]").forEach((input) => {
-      input.addEventListener("change", () => {
+      input.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         const sampleId = Number.parseInt(input.value, 10);
         if (!Number.isInteger(sampleId)) {
           return;
         }
-        if (input.checked) {
-          checkedRowIds.add(sampleId);
-        } else {
-          checkedRowIds.delete(sampleId);
-        }
-        syncSelectionActions();
+        handleSelectionInteraction(sampleId, event);
       });
     });
   }
@@ -720,7 +775,49 @@
   }
 
   function selectedRowIds() {
-    return Array.from(checkedRowIds);
+    return rows.map((row) => row.id).filter((sampleId) => checkedRowIds.has(sampleId));
+  }
+
+  function handleSelectionInteraction(sampleId, event) {
+    const additive = !!(event.ctrlKey || event.metaKey);
+    const useRange = !!event.shiftKey && Number.isInteger(lastSelectedRowId);
+    if (useRange) {
+      selectRowRange(lastSelectedRowId, sampleId, additive);
+      lastSelectedRowId = sampleId;
+      renderTable();
+      return;
+    }
+    if (additive) {
+      if (checkedRowIds.has(sampleId)) {
+        checkedRowIds.delete(sampleId);
+      } else {
+        checkedRowIds.add(sampleId);
+      }
+      lastSelectedRowId = sampleId;
+      renderTable();
+      return;
+    }
+    checkedRowIds.clear();
+    checkedRowIds.add(sampleId);
+    lastSelectedRowId = sampleId;
+    renderTable();
+  }
+
+  function selectRowRange(anchorId, targetId, additive) {
+    const rowOrder = rows.map((row) => row.id);
+    const anchorIndex = rowOrder.indexOf(anchorId);
+    const targetIndex = rowOrder.indexOf(targetId);
+    if (anchorIndex === -1 || targetIndex === -1) {
+      checkedRowIds.clear();
+      checkedRowIds.add(targetId);
+      return;
+    }
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    if (!additive) {
+      checkedRowIds.clear();
+    }
+    rowOrder.slice(start, end + 1).forEach((sampleId) => checkedRowIds.add(sampleId));
   }
 
   function getColumnClassName(key, role) {
@@ -861,8 +958,8 @@
       timepoint_labels: state.timepoint_labels,
       aliquot_min: parseIntegerOrNull(state.aliquot_min),
       aliquot_max: parseIntegerOrNull(state.aliquot_max),
-      hemolysis_min: parseIntegerOrNull(state.hemolysis_min),
-      hemolysis_max: parseIntegerOrNull(state.hemolysis_max),
+      hemolysis_min: parseFloatOrNull(state.hemolysis_min),
+      hemolysis_max: parseFloatOrNull(state.hemolysis_max),
       thaw_count_min: parseIntegerOrNull(state.thaw_count_min),
       thaw_count_max: parseIntegerOrNull(state.thaw_count_max),
       volume_min: parseFloatOrNull(state.volume_min),
@@ -1026,7 +1123,7 @@
 
   function renderNumberRangeFields(columnKey) {
     const [minField, maxField] = numberFieldMap[columnKey];
-    const step = columnKey === "volume" ? "0.01" : "1";
+    const step = columnKey === "volume" ? "0.01" : columnKey === "hemolysis_classification" ? "0.5" : "1";
     return `
       <div class="samples-range-grid">
         <label>Min
@@ -1202,6 +1299,257 @@
   function closeOverlays() {
     closeFilterWindow();
     closeColumnPicker();
+  }
+
+  function openBulkDialog() {
+    if (!bulkDialog) {
+      return;
+    }
+    bulkDialog.showModal();
+  }
+
+  function closeBulkDialog() {
+    bulkDialog?.close();
+  }
+
+  function resetBulkDialog() {
+    bulkPreviewPayload = null;
+    if (bulkFileInput) {
+      bulkFileInput.value = "";
+      bulkFileInput.disabled = false;
+    }
+    if (bulkCommitButton) {
+      bulkCommitButton.disabled = true;
+      bulkCommitButton.hidden = true;
+      bulkCommitButton.classList.add("hidden");
+      bulkCommitButton.textContent = "Import Valid Rows";
+    }
+    if (bulkResetButton) {
+      bulkResetButton.hidden = true;
+      bulkResetButton.classList.add("hidden");
+    }
+    if (bulkPreviewBox) {
+      bulkPreviewBox.innerHTML = "";
+      bulkPreviewBox.hidden = true;
+      bulkPreviewBox.classList.add("hidden");
+    }
+    setBulkStatus("");
+    setBulkError("");
+  }
+
+  async function handleBulkFileSelected() {
+    const file = bulkFileInput?.files?.[0];
+    if (!file) {
+      resetBulkDialog();
+      return;
+    }
+    setBulkError("");
+    setBulkStatus("Validating workbook...", "info");
+    if (bulkPreviewBox) {
+      bulkPreviewBox.innerHTML = "";
+      bulkPreviewBox.hidden = true;
+      bulkPreviewBox.classList.add("hidden");
+    }
+    if (bulkCommitButton) {
+      bulkCommitButton.disabled = true;
+      bulkCommitButton.hidden = true;
+      bulkCommitButton.classList.add("hidden");
+    }
+    if (bulkResetButton) {
+      bulkResetButton.hidden = false;
+      bulkResetButton.classList.remove("hidden");
+    }
+    if (bulkFileInput) {
+      bulkFileInput.disabled = true;
+    }
+    try {
+      const formData = new FormData();
+      formData.append("import_file", file);
+      const response = await fetch("/api/samples/bulk/preview-upload", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Unable to preview workbook");
+      }
+      bulkPreviewPayload = payload;
+      renderBulkPreview(payload);
+    } catch (error) {
+      bulkPreviewPayload = null;
+      setBulkStatus("");
+      setBulkError(error.message || "Unable to preview workbook");
+    } finally {
+      if (bulkFileInput) {
+        bulkFileInput.disabled = false;
+      }
+    }
+  }
+
+  async function commitBulkImport() {
+    if (!bulkPreviewPayload?.raw_payload) {
+      return;
+    }
+    setBulkError("");
+    setBulkStatus("Importing samples...", "info");
+    if (bulkCommitButton) {
+      bulkCommitButton.disabled = true;
+      bulkCommitButton.textContent = "Importing...";
+    }
+    try {
+      const response = await fetch("/api/samples/bulk/commit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          raw_payload: bulkPreviewPayload.raw_payload,
+          target_box_id: null,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Unable to import workbook");
+      }
+      renderBulkResult(payload);
+      await fetchRows();
+    } catch (error) {
+      setBulkStatus("");
+      setBulkError(error.message || "Unable to import workbook");
+      if (bulkCommitButton) {
+        bulkCommitButton.disabled = false;
+        bulkCommitButton.textContent = "Import Valid Rows";
+      }
+    }
+  }
+
+  function renderBulkPreview(preview) {
+    const hasGlobalErrors = Array.isArray(preview.global_errors) && preview.global_errors.length > 0;
+    const hasValidRows = Number(preview.valid_rows || 0) > 0;
+    const hasInvalidRows = Number(preview.invalid_rows || 0) > 0;
+    setBulkStatus(
+      `Preview ready: ${preview.valid_rows || 0} valid / ${preview.invalid_rows || 0} invalid / ${preview.total_rows || 0} total`,
+      hasInvalidRows || hasGlobalErrors ? "warning" : "success",
+    );
+    if (bulkPreviewBox) {
+      bulkPreviewBox.innerHTML = renderBulkTable(
+        "Preview",
+        preview.rows || [],
+        preview.global_errors || [],
+        `${preview.valid_rows || 0} valid / ${preview.invalid_rows || 0} invalid / ${preview.total_rows || 0} total`,
+      );
+      bulkPreviewBox.hidden = false;
+      bulkPreviewBox.classList.remove("hidden");
+    }
+    if (bulkCommitButton) {
+      bulkCommitButton.hidden = false;
+      bulkCommitButton.classList.remove("hidden");
+      bulkCommitButton.disabled = !hasValidRows || hasGlobalErrors;
+      bulkCommitButton.textContent = "Import Valid Rows";
+    }
+  }
+
+  function renderBulkResult(result) {
+    const hasFailures = Number(result.failed_rows || 0) > 0 || (result.global_errors || []).length > 0;
+    setBulkStatus(
+      `Import complete: ${result.imported_rows || 0} imported / ${result.skipped_rows || 0} skipped / ${result.failed_rows || 0} failed`,
+      hasFailures ? "warning" : "success",
+    );
+    if (bulkPreviewBox) {
+      bulkPreviewBox.innerHTML = renderBulkTable(
+        "Import Result",
+        result.rows || [],
+        result.global_errors || [],
+        `${result.imported_rows || 0} imported / ${result.skipped_rows || 0} skipped / ${result.failed_rows || 0} failed`,
+      );
+      bulkPreviewBox.hidden = false;
+      bulkPreviewBox.classList.remove("hidden");
+    }
+    if (bulkCommitButton) {
+      bulkCommitButton.hidden = true;
+      bulkCommitButton.classList.add("hidden");
+      bulkCommitButton.disabled = true;
+      bulkCommitButton.textContent = "Import Valid Rows";
+    }
+    if (bulkResetButton) {
+      bulkResetButton.hidden = false;
+      bulkResetButton.classList.remove("hidden");
+    }
+  }
+
+  function renderBulkTable(title, rows, globalErrors, summary) {
+    return `
+      <div class="section-head">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          <p class="muted">${escapeHtml(summary)}</p>
+        </div>
+      </div>
+      ${globalErrors.length ? `
+        <div class="bulk-errors">
+          ${globalErrors.map((error) => `<p class="form-error">${escapeHtml(error)}</p>`).join("")}
+        </div>
+      ` : ""}
+      <div class="bulk-table-wrap">
+        <table class="table bulk-table samples-bulk-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>ID</th>
+              <th>Type</th>
+              <th>Placement</th>
+              <th>Box</th>
+              <th>Position</th>
+              <th>Status</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr class="bulk-row-${escapeHtml(row.status || "invalid")}">
+                <td>${escapeHtml(String(row.row_number ?? "--"))}</td>
+                <td>${escapeHtml(row.sample_id || "--")}</td>
+                <td>${escapeHtml(row.sample_type || "--")}</td>
+                <td>${escapeHtml(renderPlacementSummary(row))}</td>
+                <td>${escapeHtml(row.assigned_box_name || row.box || "--")}</td>
+                <td>${escapeHtml(row.assigned_position || row.position || "--")}</td>
+                <td><span class="status-pill">${escapeHtml(row.status || "--")}</span></td>
+                <td>${escapeHtml((row.errors || []).join("; ") || "--")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderPlacementSummary(row) {
+    const parts = [row.placement_mode || "--"];
+    if (row.placement_group) {
+      parts.push(`#${row.placement_group}`);
+    }
+    if (row.placement_offset !== null && row.placement_offset !== undefined && row.placement_offset !== "") {
+      parts.push(`+${row.placement_offset}`);
+    }
+    return parts.join(" ");
+  }
+
+  function setBulkError(message) {
+    if (!bulkErrorBox) {
+      return;
+    }
+    bulkErrorBox.textContent = message;
+    bulkErrorBox.classList.toggle("hidden", !message);
+  }
+
+  function setBulkStatus(message, tone = "info") {
+    if (!bulkStatusBox) {
+      return;
+    }
+    bulkStatusBox.textContent = message;
+    bulkStatusBox.dataset.tone = tone;
+    bulkStatusBox.classList.toggle("hidden", !message);
   }
 
   function setError(message) {

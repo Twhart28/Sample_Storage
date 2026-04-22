@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from app.repositories import storage as storage_repository
 from app.schemas import (
     BoxCreateInput,
     StorageLookupView,
+    StorageNodeBatchMoveInput,
     StorageNodeCreate,
     StorageNodeMoveInput,
     StorageNodeUpdate,
@@ -37,6 +40,27 @@ class StorageError(Exception):
 
 def list_storage_tree(db: Session) -> list[StorageNodeView]:
     return [_node_view(node) for node in storage_repository.list_root_nodes(db)]
+
+
+def search_boxes(db: Session, query: str) -> list[StorageNodeView]:
+    normalized = (query or "").strip().lower()
+    if not normalized:
+        return []
+    matches: list[StorageNodeView] = []
+    for node in storage_repository.list_boxes(db):
+        haystack = " ".join(
+            part
+            for part in [
+                node.name,
+                node.display_name,
+                _node_path(node),
+                node.notes or "",
+            ]
+            if part
+        ).lower()
+        if normalized in haystack:
+            matches.append(_node_view(node))
+    return sorted(matches, key=lambda item: item.path.lower())
 
 
 def list_boxes(db: Session) -> list[models.StorageNode]:
@@ -92,7 +116,6 @@ def create_storage_node(
     _ensure_unique_name(db, data.node_type, name)
     node = models.StorageNode(
         name=name,
-        nickname=_clean_optional_text(data.nickname),
         notes=_clean_optional_text(data.notes),
         node_type=models.StorageNodeType(data.node_type),
         parent_id=parent.id if parent else None,
@@ -109,7 +132,6 @@ def create_storage_node(
                 "node_id": node.id,
                 "node_type": node.node_type.value,
                 "name": node.name,
-                "nickname": node.nickname,
                 "parent_id": node.parent_id,
                 "path": _node_path(node),
             },
@@ -131,7 +153,6 @@ def update_storage_node(
     _ensure_unique_name(db, node.node_type.value, name, exclude_node_id=node.id)
     before_snapshot = _storage_snapshot(node)
     node.name = name
-    node.nickname = _clean_optional_text(data.nickname)
     node.notes = _clean_optional_text(data.notes)
     db.add(node)
     db.flush()
@@ -146,7 +167,6 @@ def update_storage_node(
             "node_id": node.id,
             "node_type": node.node_type.value,
             "name": node.name,
-            "nickname": node.nickname,
             "path": _node_path(node),
             "before": before_snapshot,
             "after": after_snapshot,
@@ -192,6 +212,61 @@ def move_storage_node(
     db.commit()
     db.refresh(node)
     return node
+
+
+def move_storage_nodes(
+    db: Session,
+    data: StorageNodeBatchMoveInput,
+    user: models.User | None,
+) -> list[models.StorageNode]:
+    node_ids = _normalize_node_ids(data.node_ids)
+    if not node_ids:
+        raise StorageError("Select at least one storage node to move")
+    nodes = _resolve_nodes_for_batch_move(db, node_ids)
+    _validate_batch_selection(nodes)
+    target_parent = _validate_batch_parent(db, nodes, data.parent_id)
+
+    moved_nodes: list[models.StorageNode] = []
+    before_paths = {node.id: _node_path(node) for node in nodes}
+    batch_group_id = uuid4().hex
+    destination_path = _node_path(target_parent) if target_parent else "Root"
+    batch_group_title = f"Move to {destination_path}"
+    for node in nodes:
+        node.parent_id = target_parent.id if target_parent else None
+        db.add(node)
+        moved_nodes.append(node)
+
+    db.flush()
+
+    for node in moved_nodes:
+        db.refresh(node)
+        _log_event(
+            db,
+            event_type=models.EventType.create_storage,
+            user=user,
+            payload={
+                "action": "move",
+                "node_id": node.id,
+                "node_type": node.node_type.value,
+                "name": node.name,
+                "parent_id": node.parent_id,
+                "before_path": before_paths[node.id],
+                "after_path": _node_path(node),
+                "batch_group_kind": "storage_move_batch",
+                "batch_group_id": batch_group_id,
+                "batch_group_title": batch_group_title,
+                "batch_action_label": "Move storage",
+                "batch_workflow_label": "Storage move",
+                "batch_sample_count": len(moved_nodes),
+                "batch_count_label": "Items",
+                "batch_destination_path": destination_path,
+            },
+        )
+
+    db.commit()
+    for node in moved_nodes:
+        db.refresh(node)
+    return moved_nodes
 
 
 def delete_storage_node(db: Session, node_id: int, user: models.User | None) -> None:
@@ -301,17 +376,21 @@ def _ensure_unique_name(
 
 def _node_view(node: models.StorageNode) -> StorageNodeView:
     child_types = CHILD_TYPES[node.node_type.value]
+    filled_positions = sum(1 for position in node.positions if position.location is not None)
+    total_positions = len(node.positions)
     return StorageNodeView(
         id=node.id,
         name=node.name,
-        nickname=node.nickname,
         notes=node.notes,
         display_name=node.display_name,
+        path=_node_path(node),
         node_type=node.node_type.value,
         parent_id=node.parent_id,
         can_accept_children=bool(child_types),
+        filled_positions=filled_positions,
+        total_positions=total_positions,
         child_types=child_types,
-        children=[_node_view(child) for child in sorted(node.children, key=lambda item: item.name.lower())],
+        children=[_node_view(child) for child in sorted(node.children, key=_storage_sort_key)],
     )
 
 
@@ -322,6 +401,67 @@ def _is_descendant(candidate_parent: models.StorageNode, node: models.StorageNod
             return True
         current = current.parent
     return False
+
+
+def _validate_batch_parent(
+    db: Session,
+    nodes: list[models.StorageNode],
+    parent_id: int | None,
+) -> models.StorageNode | None:
+    parent = storage_repository.get_node(db, parent_id) if parent_id is not None else None
+    if parent_id is not None and parent is None:
+        raise StorageError("Parent node not found")
+    for node in nodes:
+        allowed = ALLOWED_PARENTS[node.node_type.value]
+        parent_type = parent.node_type.value if parent else None
+        if parent_type not in allowed:
+            raise StorageError(f"{node.node_type.value.title()} nodes can only be placed under: {', '.join(parent_type or 'root' for parent_type in sorted(allowed, key=lambda value: value or ''))}")
+        if parent and _is_descendant(parent, node):
+            raise StorageError("Cannot move a node inside its own subtree")
+    return parent
+
+
+def _validate_batch_selection(nodes: list[models.StorageNode]) -> None:
+    selected_ids = {node.id for node in nodes}
+    for node in nodes:
+        current = node.parent
+        while current is not None:
+            if current.id in selected_ids:
+                raise StorageError("Cannot move a parent and its descendant in the same batch")
+            current = current.parent
+
+
+def _resolve_nodes_for_batch_move(db: Session, node_ids: list[int]) -> list[models.StorageNode]:
+    nodes: list[models.StorageNode] = []
+    missing: list[int] = []
+    for node_id in node_ids:
+        node = storage_repository.get_node(db, node_id)
+        if node is None:
+            missing.append(node_id)
+            continue
+        nodes.append(node)
+    if missing:
+        raise StorageError("One or more selected storage nodes were not found")
+    return nodes
+
+
+def _normalize_node_ids(node_ids: list[int]) -> list[int]:
+    normalized: list[int] = []
+    for node_id in node_ids:
+        if node_id not in normalized:
+            normalized.append(node_id)
+    return normalized
+
+
+def _storage_sort_key(node: models.StorageNode) -> tuple[int, int, str]:
+    type_order = {
+        models.StorageNodeType.freezer: 0,
+        models.StorageNodeType.shelf: 1,
+        models.StorageNodeType.rack: 2,
+        models.StorageNodeType.box: 3,
+    }
+    branch_rank = 0 if node.node_type != models.StorageNodeType.box else 1
+    return (branch_rank, type_order.get(node.node_type, 9), node.name.lower())
 
 
 def _has_occupied_positions(node: models.StorageNode) -> bool:
@@ -344,7 +484,6 @@ def _node_path(node: models.StorageNode) -> str:
 def _storage_snapshot(node: models.StorageNode) -> dict[str, str]:
     return {
         "name": node.name,
-        "nickname": node.nickname or "--",
         "notes": node.notes or "--",
         "path": _node_path(node),
     }
@@ -353,7 +492,6 @@ def _storage_snapshot(node: models.StorageNode) -> dict[str, str]:
 def _storage_snapshot_changes(before: dict[str, str], after: dict[str, str]) -> list[dict[str, str]]:
     labels = {
         "name": "Name",
-        "nickname": "Nickname",
         "notes": "Notes",
         "path": "Path",
     }

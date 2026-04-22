@@ -101,7 +101,11 @@ def delete_study(db: Session, study_id: int) -> None:
     study = db.get(models.Study, study_id)
     if study is None:
         raise AdminError("Study was not found")
-    if sample_repository.count_samples_for_study(db, study_id) > 0:
-        raise AdminError("Study cannot be deleted while samples still reference it")
+    if (
+        sample_repository.count_samples_for_study(db, study_id) > 0
+        or study.workflow is not None
+        or bool(study.visit_sessions)
+    ):
+        raise AdminError("Study cannot be deleted while samples still reference it, or while workflows or visits still reference it")
     db.delete(study)
     db.commit()

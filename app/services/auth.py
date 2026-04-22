@@ -23,6 +23,7 @@ PERMISSION_DEFINITIONS = [
     {"key": "bulk_import_storage", "label": "Bulk Import Storage", "description": "Use storage bulk import and storage templates."},
     {"key": "bulk_import_samples", "label": "Bulk Import Samples", "description": "Use sample bulk import and sample templates."},
     {"key": "edit_samples", "label": "Create & Edit Samples", "description": "Register samples, edit sample records, and add notes."},
+    {"key": "execute_visits", "label": "Execute Study Workflows", "description": "Run visit workflows, upload visit workbooks, and complete visit sessions."},
     {"key": "process_analysis", "label": "Process Analysis", "description": "Run analysis batches that update volume, thaw counts, and storage outcomes."},
     {"key": "archive_samples", "label": "Archive Samples", "description": "Archive samples out of active freezer inventory."},
     {"key": "delete_samples", "label": "Delete Samples", "description": "Permanently delete samples with audit tracking."},
@@ -32,7 +33,7 @@ PERMISSION_DEFINITIONS = [
 PERMISSION_KEYS = {item["key"] for item in PERMISSION_DEFINITIONS}
 ROLE_DEFAULT_PERMISSIONS = {
     models.UserRole.admin: set(PERMISSION_KEYS),
-    models.UserRole.staff: {"bulk_import_samples", "edit_samples", "process_analysis", "archive_samples", "place_move_samples"},
+    models.UserRole.staff: {"bulk_import_samples", "edit_samples", "execute_visits", "process_analysis", "archive_samples", "place_move_samples"},
 }
 
 

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Study Workflows</p>
+    <h1>Visit Execution</h1>
+    <p class="muted">Start a visit session, use the study tools, upload the completed workbook, and finish on a printable summary.</p>
+  </div>
+  <div class="page-actions">
+    <a class="ghost-button" href="/dashboard">Back to Home</a>
+  </div>
+</section>
+
+{% if error_message %}
+  <p class="form-error">{{ error_message }}</p>
+{% endif %}
+
+<section class="workspace-grid">
+  <article class="card">
+    <h2>Start Visit Session</h2>
+    <form method="post" action="/visit-workflows" class="form-grid compact-form">
+      <label>Study
+        <select name="study_id" required>
+          <option value="">Select study</option>
+          {% for workflow in workflows %}
+            <option value="{{ workflow.study_id }}" {% if initial_values.study_id == workflow.study_id|string %}selected{% endif %}>{{ workflow.study_name }}{% if workflow.label %} · {{ workflow.label }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Participant ID
+        <input type="text" name="participant_id" value="{{ initial_values.participant_id or '' }}" required />
+      </label>
+      <label>Visit Date
+        <input type="datetime-local" name="visit_date" value="{{ initial_values.visit_date or '' }}" required />
+      </label>
+      <div class="actions-row span-2">
+        <button type="submit">Start workflow</button>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="section-head">
+      <h2>Available Studies</h2>
+      <span class="muted">{{ workflows | length }} active</span>
+    </div>
+    <div class="stack-list">
+      {% for workflow in workflows %}
+        <div class="stack-row">
+          <span>
+            <strong>{{ workflow.study_name }}</strong>
+          </span>
+          <span>
+            <em>{{ workflow.label }}</em>
+            <small>{{ workflow.description or 'No workflow description' }}</small>
+          </span>
+        </div>
+      {% else %}
+        <p class="muted">No active study workflows are configured yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <h2>Recent Sessions</h2>
+    <span class="muted">{{ recent_sessions | length }} shown</span>
+  </div>
+  <div class="stack-list">
+    {% for session in recent_sessions %}
+      <a class="stack-row" href="/visit-workflows/{{ session.id }}">
+        <span>
+          <strong>{{ session.study_name }} · {{ session.participant_id }}</strong>
+        </span>
+        <span>
+          <em>{{ session.status.replace('_', ' ').title() }}</em>
+          <small>{{ format_datetime(session.visit_date) }}</small>
+        </span>
+      </a>
+    {% else %}
+      <p class="muted">No visit sessions yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

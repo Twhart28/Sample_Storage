@@ -8,10 +8,23 @@
         <a class="ghost-button" href="/storage/bulk">Bulk Import</a>
       {% endif %}
       {% if has_permission(current_user, 'manage_storage_tree') %}
+        <button type="button" class="ghost-button hidden" id="storage-move-selected-button" hidden>Move selected</button>
         <button type="button" class="icon-button toolbar-button" data-action="add-root">+</button>
       {% endif %}
     </div>
   </div>
+  <form method="get" action="/storage" class="storage-search-form">
+    <label class="storage-search-field">
+      <span class="muted">Search boxes</span>
+      <input type="search" name="q" value="{{ search_query or '' }}" placeholder="Box name, notes, or path" />
+    </label>
+    <div class="page-actions">
+      <button type="submit">Search</button>
+      {% if search_query %}
+        <a class="ghost-button" href="/storage">Clear</a>
+      {% endif %}
+    </div>
+  </form>
   {% macro render_node(node) %}
     <li
       id="node-{{ node.id }}"
@@ -19,9 +32,9 @@
       data-node-id="{{ node.id }}"
       data-node-type="{{ node.node_type }}"
       data-node-name="{{ node.name }}"
-      data-node-nickname="{{ node.nickname or '' }}"
       data-node-notes="{{ node.notes or '' }}"
       data-node-display-name="{{ node.display_name }}"
+      data-node-path="{{ node.path }}"
       data-parent-id="{{ node.parent_id or '' }}"
       data-can-accept-children="{{ 'true' if node.can_accept_children else 'false' }}"
       data-child-types="{{ node.child_types | join(',') }}"
@@ -32,11 +45,17 @@
         {% else %}
           <span class="tree-spacer"></span>
         {% endif %}
-        {% if node.node_type == 'box' %}
-          <a class="node-link" href="/boxes/{{ node.id }}">{{ node.display_name }}</a>
-        {% else %}
-          <span class="node-label">{{ node.display_name }}</span>
-        {% endif %}
+        <div class="storage-node-main">
+          {% if node.node_type != 'box' %}
+            <span class="storage-node-kind storage-node-kind--{{ node.node_type }}">{{ node.node_type.replace('_', ' ') }}</span>
+          {% endif %}
+          {% if node.node_type == 'box' %}
+            <a class="node-link" href="/boxes/{{ node.id }}" title="{{ node.path }}">{{ node.display_name }}</a>
+            <span class="node-capacity">{{ node.filled_positions }}/{{ node.total_positions }}</span>
+          {% else %}
+            <span class="node-label" title="{{ node.path }}">{{ node.display_name }}</span>
+          {% endif %}
+        </div>
         {% if has_permission(current_user, 'manage_storage_tree') %}
           <div class="node-actions">
             {% if node.can_accept_children %}
@@ -55,13 +74,40 @@
       {% endif %}
     </li>
   {% endmacro %}
-  <ul class="tree-list folder-tree">
-    {% for node in root_nodes %}
-      {{ render_node(node) }}
-    {% else %}
-      <li>No storage configured yet.</li>
-    {% endfor %}
-  </ul>
+  {% if search_query %}
+    <section class="storage-search-results">
+      <div class="section-head">
+        <h2>Matching Boxes</h2>
+        <p class="muted">{{ search_results | length }} result{{ '' if search_results | length == 1 else 's' }}</p>
+      </div>
+      <ul class="tree-list folder-tree storage-results-list">
+        {% for box in search_results %}
+          <li class="storage-node storage-node-search-result" id="node-{{ box.id }}">
+            <div class="storage-row">
+              <span class="tree-spacer"></span>
+              <div class="storage-result-main">
+                <div class="storage-node-main">
+                  <a class="node-link" href="/boxes/{{ box.id }}" title="{{ box.path }}">{{ box.display_name }}</a>
+                  <span class="node-capacity">{{ box.filled_positions }}/{{ box.total_positions }}</span>
+                </div>
+                <div class="muted storage-result-path">{{ box.path }}</div>
+              </div>
+            </div>
+          </li>
+        {% else %}
+          <li class="muted">No boxes matched that search.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% else %}
+    <ul class="tree-list folder-tree">
+      {% for node in root_nodes %}
+        {{ render_node(node) }}
+      {% else %}
+        <li>No storage configured yet.</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
 </section>
 
 {% if has_permission(current_user, 'manage_storage_tree') %}
@@ -80,9 +126,6 @@
     </label>
     <label>Name
       <input type="text" name="name" id="add-node-name" required />
-    </label>
-    <label>Nickname
-      <input type="text" name="nickname" id="add-node-nickname" />
     </label>
     <label>Notes
       <textarea name="notes" id="add-node-notes"></textarea>
@@ -114,9 +157,6 @@
     <label>Name
       <input type="text" name="name" id="edit-node-name" required />
     </label>
-    <label>Nickname
-      <input type="text" name="nickname" id="edit-node-nickname" />
-    </label>
     <label>Notes
       <textarea name="notes" id="edit-node-notes"></textarea>
     </label>
@@ -124,6 +164,23 @@
     <div class="actions-row storage-dialog-actions">
       <button type="submit">Save</button>
       <button type="button" class="ghost-button" id="storage-delete-button">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="storage-move-dialog" class="storage-dialog">
+  <form method="dialog" class="storage-dialog-form" id="storage-move-form">
+    <div class="section-head">
+      <h2>Move selected storage items</h2>
+      <button type="button" class="ghost-button" data-action="close-dialog">Close</button>
+    </div>
+    <p class="muted" id="storage-move-summary"></p>
+    <label>Destination
+      <select id="storage-move-target" required></select>
+    </label>
+    <p class="muted hidden" id="storage-move-help"></p>
+    <div class="actions-row storage-dialog-actions">
+      <button type="submit" id="storage-move-submit">Move</button>
     </div>
   </form>
 </dialog>

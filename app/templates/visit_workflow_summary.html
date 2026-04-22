@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head card compact">
+  <div>
+    <p class="eyebrow">Visit Summary</p>
+    <h1>{{ session.study_name }} · {{ session.participant_id }}</h1>
+    <p class="muted">{{ session.workflow_label }} · {{ format_datetime(session.visit_date) }}</p>
+  </div>
+  <div class="page-actions">
+    <a class="ghost-button" href="/visit-workflows/{{ session.id }}">Back to session</a>
+    <button type="button" onclick="window.print()">Print</button>
+  </div>
+</section>
+
+<section class="workspace-grid">
+  <article class="card">
+    <h2>Visit</h2>
+    <dl class="detail-grid">
+      <div><dt>Study</dt><dd>{{ session.study_name }}</dd></div>
+      <div><dt>Workflow</dt><dd>{{ session.workflow_label }}</dd></div>
+      <div><dt>Participant ID</dt><dd>{{ session.participant_id }}</dd></div>
+      <div><dt>Visit Date</dt><dd>{{ format_datetime(session.visit_date) }}</dd></div>
+      <div><dt>Operator</dt><dd>{{ session.operator_name or '--' }}</dd></div>
+      <div><dt>Status</dt><dd>{{ session.status.replace('_', ' ').title() }}</dd></div>
+      <div><dt>Uploaded workbook</dt><dd>{{ session.uploaded_workbook_filename or '--' }}</dd></div>
+      <div><dt>Imported rows</dt><dd>{{ session.imported_rows }}</dd></div>
+    </dl>
+  </article>
+
+  <article class="card">
+    <h2>Notes</h2>
+    <div class="notes-block">
+      <strong>Visit notes</strong>
+      <p>{{ session.session_notes or 'No notes recorded.' }}</p>
+    </div>
+  </article>
+</section>
+
+<section class="workspace-grid">
+  <article class="card">
+    <div class="section-head">
+      <h2>Created Samples</h2>
+      <span class="muted">{{ session.created_samples | length }} linked</span>
+    </div>
+    <div class="stack-list">
+      {% for sample in session.created_samples %}
+        <a class="stack-row" href="{{ sample.detail_url }}">
+          <span><strong>{{ sample.sample_identifier or sample.sample_id }}</strong></span>
+          <span>
+            <em>{{ sample.sample_type_name or '--' }}</em>
+            <small>{{ sample.location_label or 'Unplaced' }}</small>
+          </span>
+        </a>
+      {% else %}
+        <p class="muted">No samples were created for this visit session.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <h2>Referenced Tools</h2>
+    <div class="stack-list">
+      {% for link in session.quick_links %}
+        <a class="stack-row" href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
+          <span><strong>{{ link.label }}</strong></span>
+        </a>
+      {% else %}
+        <p class="muted">No quick links were configured.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

@@ -97,6 +97,7 @@ async def list_samples(
                 "sample_actions_workspace_url": sample_actions_service.WORKSPACE_URL,
                 "sample_actions_storage_key": sample_actions_service.SELECTION_STORAGE_KEY,
             },
+            "can_bulk_import_samples": auth_service.has_permission(current_user, "bulk_import_samples"),
             "label_help": LABEL_HELP,
         },
     )
@@ -120,7 +121,7 @@ async def create_sample(request: Request, db: Session = Depends(get_db)):
         visit_label=_normalize_text(initial_values["visit_label"]),
         timepoint_label=_normalize_text(initial_values["timepoint_label"]),
         aliquot_number=_parse_int(initial_values["aliquot_number"]),
-        hemolysis_classification=_parse_int(initial_values["hemolysis_classification"]),
+        hemolysis_classification=_parse_float(initial_values["hemolysis_classification"]),
         study_role=initial_values["study_role"] or "current",
         volume=_parse_float(initial_values["volume"]),
         volume_units=_normalize_text(initial_values["volume_units"]) or "mL",
@@ -144,8 +145,8 @@ async def create_sample(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/samples/bulk")
 async def bulk_samples_page(request: Request, db: Session = Depends(get_db)):
-    current_user = require_permission("bulk_import_samples")(request, db)
-    return _render_bulk_samples_page(request, db, current_user=current_user)
+    _ = require_permission("bulk_import_samples")(request, db)
+    return RedirectResponse("/samples", status_code=303)
 
 
 @router.get("/samples/bulk/template")
@@ -158,16 +159,6 @@ async def bulk_samples_template(request: Request, db: Session = Depends(get_db))
         content=bulk_import_service.sample_template_xlsx(sample_types=sample_types, studies=studies, boxes=boxes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="sample-import-template.xlsx"'},
-    )
-
-
-@router.get("/samples/bulk/template.csv")
-async def bulk_samples_template_csv(current_user=Depends(require_permission("bulk_import_samples"))):
-    _ = current_user
-    return Response(
-        content=bulk_import_service.sample_template_csv(),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="sample-import-template.csv"'},
     )
 
 
@@ -251,7 +242,7 @@ async def update_sample(sample_id: int, request: Request, db: Session = Depends(
         visit_label=_normalize_text(initial_values["visit_label"]),
         timepoint_label=_normalize_text(initial_values["timepoint_label"]),
         aliquot_number=_parse_int(initial_values["aliquot_number"]),
-        hemolysis_classification=_parse_int(initial_values["hemolysis_classification"]),
+        hemolysis_classification=_parse_float(initial_values["hemolysis_classification"]),
         study_role=initial_values["study_role"] or None,
         volume=_parse_float(initial_values["volume"]),
         volume_units=_normalize_text(initial_values["volume_units"]) or "mL",
@@ -559,9 +550,9 @@ def _build_search_query(request: Request) -> SampleSearchQuery:
         aliquot_number=_parse_int(params.get("aliquot_number")),
         aliquot_min=_parse_int(params.get("aliquot_min")),
         aliquot_max=_parse_int(params.get("aliquot_max")),
-        hemolysis_classification=_parse_int(params.get("hemolysis_classification")),
-        hemolysis_min=_parse_int(params.get("hemolysis_min")),
-        hemolysis_max=_parse_int(params.get("hemolysis_max")),
+        hemolysis_classification=_parse_float(params.get("hemolysis_classification")),
+        hemolysis_min=_parse_float(params.get("hemolysis_min")),
+        hemolysis_max=_parse_float(params.get("hemolysis_max")),
         thaw_count_min=_parse_int(params.get("thaw_count_min")),
         thaw_count_max=_parse_int(params.get("thaw_count_max")),
         volume_min=_parse_float(params.get("volume_min")),

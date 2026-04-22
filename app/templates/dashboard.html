@@ -32,6 +32,19 @@
 </section>
 
 <section class="split-grid">
+  {% if current_user and has_permission(current_user, 'execute_visits') %}
+    <article class="card">
+      <div class="section-head">
+        <h2>Study Workflows</h2>
+        <a href="/visit-workflows">Open workflows</a>
+      </div>
+      <p class="muted">Run study visit sessions, use linked worksheets, upload the completed visit workbook, and finish on a printable summary.</p>
+      <div class="actions-row">
+        <a class="button" href="/visit-workflows">Start visit workflow</a>
+      </div>
+      <p class="muted">{{ active_workflow_count }} active workflow{{ '' if active_workflow_count == 1 else 's' }}</p>
+    </article>
+  {% endif %}
   <article class="card">
     <div class="section-head">
       <h2>Study Roles</h2>

@@ -106,14 +106,17 @@
 </section>
 
 {% if box.positions and can_place_move_samples %}
-  <dialog id="box-place-dialog" class="storage-dialog">
+  <dialog id="box-place-dialog" class="storage-dialog" data-box-name="{{ box.box_name }}">
     <form method="post" action="/boxes/{{ box.box_id }}/place" class="storage-dialog-form" id="box-place-form">
       <div class="section-head">
         <h2>Place Sample</h2>
         <button type="button" class="ghost-button" data-action="close-place-dialog">Close</button>
       </div>
       <input type="hidden" name="position_id" id="place-position-id" />
-      <p class="muted" id="place-position-label"></p>
+      <div class="actions-row box-place-toolbar">
+        <p class="muted" id="place-position-label"></p>
+        <button type="button" class="ghost-button" id="copy-box-position-button">Copy box + position</button>
+      </div>
       <label>Find Sample
         <input type="search" id="place-sample-search" placeholder="Search by ID, type, visit, or timepoint" />
       </label>

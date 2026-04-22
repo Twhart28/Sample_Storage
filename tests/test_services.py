@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from datetime import datetime
@@ -7,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import close_all_sessions
 
 from app import db
@@ -30,10 +31,15 @@ from app.schemas import (
     SampleSearchQuery,
     SampleUpdateInput,
     SampleTypeCreate,
+    StudyWorkflowConfigInput,
     StorageNodeCreate,
+    StorageNodeBatchMoveInput,
     StorageNodeMoveInput,
     StorageNodeUpdate,
     StudyCreate,
+    VisitSessionCompleteInput,
+    VisitSessionCreateInput,
+    VisitSessionNotesInput,
 )
 from app.services import admin as admin_service
 from app.services import analyses as analysis_service
@@ -43,6 +49,7 @@ from app.services import batch_modify as batch_modify_service
 from app.services import bulk_imports as bulk_import_service
 from app.services import samples as sample_service
 from app.services import storage as storage_service
+from app.services import visit_workflows as visit_service
 
 
 class SampleWorkflowServiceTests(unittest.TestCase):
@@ -718,7 +725,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertIn("Sample type was not found", preview.rows[0].errors)
         self.assertIn("Study role must be current or retired", preview.rows[0].errors)
         self.assertIn("Visit must contain numbers only", preview.rows[0].errors)
-        self.assertIn("Hemolysis must be a whole number from 0 to 6", preview.rows[0].errors)
+        self.assertIn("Hemolysis must be between 1 and 7 in 0.5 increments", preview.rows[0].errors)
         self.assertIn("Thaw count is required", preview.rows[0].errors)
 
         sheet["O2"] = "Plasma"
@@ -1199,7 +1206,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
                 visit_label="1",
                 timepoint_label="60",
                 thaw_count=1,
-                hemolysis_classification=4,
+                hemolysis_classification=4.5,
                 volume=0.8,
                 notes="First visit",
             ),
@@ -1257,11 +1264,11 @@ class SampleWorkflowServiceTests(unittest.TestCase):
 
         filtered = sample_service.search_samples(
             self.session,
-            SampleSearchQuery(usage="used", thaw_count_min=1, volume_max=0.9, hemolysis_min=4),
+            SampleSearchQuery(usage="used", thaw_count_min=1, volume_max=0.9, hemolysis_min=4.5),
         )
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].sample_id, "SOV21-V1-T60")
-        self.assertEqual(filtered[0].hemolysis_classification, 4)
+        self.assertEqual(filtered[0].hemolysis_classification, 4.5)
 
         option_payload = sample_service.get_filter_options(
             self.session,
@@ -1270,14 +1277,24 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         )
         self.assertEqual({option.value: option.count for option in option_payload.options}, {"unused": 1, "used": 1})
 
-    def test_hemolysis_must_be_zero_through_six(self):
+    def test_hemolysis_must_be_one_through_seven_in_half_steps(self):
         with self.assertRaises(sample_service.SampleError):
             sample_service.create_sample(
                 self.session,
                 SampleCreateInput(
                     sample_id="S-BAD-HEM",
                     sample_type_id=self.sample_type.id,
-                    hemolysis_classification=7,
+                    hemolysis_classification=8,
+                ),
+                self.user,
+            )
+        with self.assertRaises(sample_service.SampleError):
+            sample_service.create_sample(
+                self.session,
+                SampleCreateInput(
+                    sample_id="S-BAD-HEM-STEP",
+                    sample_type_id=self.sample_type.id,
+                    hemolysis_classification=1.25,
                 ),
                 self.user,
             )
@@ -1313,7 +1330,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
                 self.user,
             )
 
-    def test_storage_hierarchy_and_nickname_rules(self):
+    def test_storage_hierarchy_and_notes_rules(self):
         with self.assertRaises(storage_service.StorageError):
             storage_service.create_storage_node(
                 self.session,
@@ -1324,10 +1341,9 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         rack = storage_service.update_storage_node(
             self.session,
             self.rack.id,
-            StorageNodeUpdate(name="Rack 1", nickname="Cold lane", notes="North corner"),
+            StorageNodeUpdate(name="Rack 1", notes="North corner"),
             self.user,
         )
-        self.assertEqual(rack.nickname, "Cold lane")
         self.assertEqual(rack.notes, "North corner")
 
         moved = storage_service.move_storage_node(
@@ -1366,6 +1382,76 @@ class SampleWorkflowServiceTests(unittest.TestCase):
                 self.user,
             )
 
+    def test_storage_batch_move_moves_selected_nodes_atomically(self):
+        rack_two = storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Rack 2", node_type="rack", parent_id=self.shelf.id),
+            self.user,
+        )
+
+        moved_nodes = storage_service.move_storage_nodes(
+            self.session,
+            StorageNodeBatchMoveInput(node_ids=[self.rack.id, rack_two.id], parent_id=self.freezer.id),
+            self.user,
+        )
+
+        self.assertEqual({node.id for node in moved_nodes}, {self.rack.id, rack_two.id})
+        self.assertTrue(all(node.parent_id == self.freezer.id for node in moved_nodes))
+
+    def test_storage_batch_move_groups_activity_feed(self):
+        rack_two = storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Rack 2", node_type="rack", parent_id=self.shelf.id),
+            self.user,
+        )
+
+        storage_service.move_storage_nodes(
+            self.session,
+            StorageNodeBatchMoveInput(node_ids=[self.rack.id, rack_two.id], parent_id=self.freezer.id),
+            self.user,
+        )
+
+        feed = event_service.list_events(self.session, query=EventSearchQuery(event_type="move_storage", limit=20))
+
+        self.assertEqual(len(feed), 3)
+        parent = feed[0]
+        children = feed[1:]
+        self.assertTrue(parent.is_group_parent)
+        self.assertEqual(parent.group_kind, "storage_move_batch")
+        self.assertEqual(parent.group_count, 2)
+        self.assertEqual(parent.title, "Move to Freezer A")
+        self.assertIn("2 items", parent.context_line)
+        self.assertIn("Freezer A", parent.context_line)
+        self.assertEqual(len(parent.group_children), 2)
+        self.assertTrue(all(child.is_group_child for child in children))
+        self.assertEqual({child.title for child in children}, {"Rack 1", "Rack 2"})
+
+    def test_storage_batch_move_rejects_parent_and_descendant_selection(self):
+        with self.assertRaises(storage_service.StorageError):
+            storage_service.move_storage_nodes(
+                self.session,
+                StorageNodeBatchMoveInput(node_ids=[self.rack.id, self.box.id], parent_id=self.freezer.id),
+                self.user,
+            )
+
+    def test_storage_tree_sorts_branch_nodes_before_boxes(self):
+        storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Shelf Box", node_type="box", parent_id=self.shelf.id),
+            self.user,
+        )
+        storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Rack 2", node_type="rack", parent_id=self.shelf.id),
+            self.user,
+        )
+
+        tree = storage_service.list_storage_tree(self.session)
+        freezer = next(node for node in tree if node.name == "Freezer A")
+        shelf = next(node for node in freezer.children if node.name == "Shelf 1")
+
+        self.assertEqual([child.node_type for child in shelf.children], ["rack", "rack", "box"])
+
     def test_bulk_sample_import_preview_flags_duplicates_and_invalid_values(self):
         sample_service.create_sample(
             self.session,
@@ -1381,12 +1467,12 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         )
         raw_payload = "\n".join(
             [
-                "sample_id,sample_type,study,visit,timepoint,aliquot,hemolysis,study_role,volume,volume_units,thaw_count,notes,collection_at,position",
-                "S-001,Plasma,Sovary,1,00,1,1,current,1.0,mL,0,Existing combination,03/10/26 08:00,A1",
-                "S-002,Unknown,Sovary,V1,T15,alpha,8,bad_role,-1,mL,-1,Invalid row,not-a-date,A2",
-                "S-003,Plasma,MISSING,1,30,2,2,current,0.5,mL,1,Missing study,03/10/26 08:30,A3",
-                "S-004,Plasma,Sovary,2,15,1,2,current,0.5,mL,1,Duplicate composite one,03/10/26 08:45,A4",
-                "S-004,Plasma,Sovary,2,15,1,3,current,0.4,mL,1,Duplicate composite two,03/10/26 09:00,B1",
+                "sample_id,sample_type,study,visit,timepoint,aliquot,hemolysis,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-001,Plasma,Sovary,1,00,1,1,current,1.0,mL,0,Existing combination,03/10/26 08:00,,A1,specific,,",
+                "S-002,Unknown,Sovary,V1,T15,alpha,7.5,bad_role,-1,mL,-1,Invalid row,not-a-date,,A2,specific,,",
+                "S-003,Plasma,MISSING,1,30,2,2,current,0.5,mL,1,Missing study,03/10/26 08:30,,A3,specific,,",
+                "S-004,Plasma,Sovary,2,15,1,2,current,0.5,mL,1,Duplicate composite one,03/10/26 08:45,,A4,specific,,",
+                "S-004,Plasma,Sovary,2,15,1,3,current,0.4,mL,1,Duplicate composite two,03/10/26 09:00,,B1,specific,,",
             ]
         )
 
@@ -1399,7 +1485,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertIn("Sample type was not found", preview.rows[1].errors)
         self.assertIn("Visit must contain numbers only", preview.rows[1].errors)
         self.assertIn("Timepoint must contain numbers only", preview.rows[1].errors)
-        self.assertIn("Hemolysis must be a whole number from 0 to 6", preview.rows[1].errors)
+        self.assertIn("Hemolysis must be between 1 and 7 in 0.5 increments", preview.rows[1].errors)
         self.assertIn("Study role must be current or retired", preview.rows[1].errors)
         self.assertIn("Study was not found", preview.rows[2].errors)
         self.assertIn("This ID, type, visit, timepoint, and aliquot combination is duplicated in this import", preview.rows[3].errors)
@@ -1408,8 +1494,8 @@ class SampleWorkflowServiceTests(unittest.TestCase):
     def test_bulk_sample_import_requires_sample_type_and_collection_date(self):
         raw_payload = "\n".join(
             [
-                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position",
-                "S-010,,Sovary,1,00,1,current,1.0,mL,0,Missing requireds,,Box 1,A1",
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-010,,Sovary,1,00,1,current,1.0,mL,0,Missing requireds,,Box 1,A1,specific,,",
             ]
         )
 
@@ -1419,23 +1505,38 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertIn("Sample type is required", preview.rows[0].errors)
         self.assertIn("Collection date is required", preview.rows[0].errors)
 
-    def test_bulk_sample_import_commit_places_explicit_and_sequential_positions(self):
+    def test_bulk_sample_import_requires_explicit_mode_when_position_is_blank(self):
         raw_payload = "\n".join(
             [
-                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,position",
-                "S-200,Plasma,Sovary,1,00,1,current,1.0,mL,0,Explicit placement,03/10/26 08:00,A2",
-                "S-201,Plasma,Sovary,1,15,2,current,0.8,mL,0,Sequential placement,03/10/26 08:15,",
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-200,Plasma,Sovary,1,00,1,current,1.0,mL,0,Blank position,03/10/26 08:00,Box 1,,,,",
             ]
         )
 
         preview = bulk_import_service.preview_sample_import(self.session, raw_payload, self.box.id)
+        self.assertEqual(preview.valid_rows, 0)
+        self.assertIn(
+            "Placement mode is required",
+            preview.rows[0].errors,
+        )
+
+    def test_bulk_sample_import_commit_places_explicit_and_next_empty_positions(self):
+        raw_payload = "\n".join(
+            [
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-200,Plasma,Sovary,1,00,1,current,1.0,mL,0,Specific placement,03/10/26 08:00,Box 1,A2,specific,,",
+                "S-201,Plasma,Sovary,1,15,2,current,0.8,mL,0,Next empty placement,03/10/26 08:15,Box 1,,next_empty,,",
+            ]
+        )
+
+        preview = bulk_import_service.preview_sample_import(self.session, raw_payload)
         self.assertEqual(preview.valid_rows, 2)
         self.assertEqual(preview.rows[0].assigned_position, "A2")
         self.assertEqual(preview.rows[1].assigned_position, "A1")
 
         result = bulk_import_service.commit_sample_import(
             self.session,
-            BulkSampleImportCommitInput(raw_payload=raw_payload, target_box_id=self.box.id),
+            BulkSampleImportCommitInput(raw_payload=raw_payload, target_box_id=None),
             self.user,
         )
 
@@ -1451,50 +1552,99 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertEqual(explicit.location_label, "A2")
         self.assertEqual(sequential.location_label, "A1")
 
-    def test_bulk_sample_import_uses_row_box_name_with_page_level_fallback(self):
+    def test_bulk_sample_import_can_leave_samples_unplaced(self):
         raw_payload = "\n".join(
             [
-                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position",
-                "S-300,Plasma,Sovary,1,00,1,current,1.0,mL,0,Row box explicit,03/10/26 08:00,Box 2,A2",
-                "S-301,Plasma,Sovary,1,15,2,current,0.8,mL,0,Row box sequential,03/10/26 08:15,Box 2,",
-                "S-302,Plasma,Sovary,1,30,3,current,0.7,mL,0,Fallback box,03/10/26 08:30,,",
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-210,Plasma,Sovary,1,00,1,current,1.0,mL,0,Unplaced sample,03/10/26 08:00,,,unplaced,,",
+            ]
+        )
+
+        preview = bulk_import_service.preview_sample_import(self.session, raw_payload)
+        self.assertEqual(preview.valid_rows, 1)
+        self.assertIsNone(preview.rows[0].assigned_box_name)
+        self.assertIsNone(preview.rows[0].assigned_position)
+
+        result = bulk_import_service.commit_sample_import(
+            self.session,
+            BulkSampleImportCommitInput(raw_payload=raw_payload, target_box_id=None),
+            self.user,
+        )
+
+        self.assertEqual(result.imported_rows, 1)
+        unplaced = sample_service.get_sample_detail(
+            self.session,
+            sample_service.search_samples(self.session, SampleSearchQuery(q="S-210"))[0].id,
+        )
+        self.assertIsNone(unplaced.location_label)
+        self.assertIsNone(unplaced.location_path)
+
+    def test_bulk_sample_import_grouped_placement_copies_anchor_position_across_boxes(self):
+        raw_payload = "\n".join(
+            [
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-300,Plasma,Sovary,1,00,1,current,1.0,mL,0,Grouped anchor,03/10/26 08:00,Box 1,A2,grouped,1,",
+                "S-301,Plasma,Sovary,1,15,2,current,0.8,mL,0,Grouped copy,03/10/26 08:15,Box 2,,grouped,1,",
+            ]
+        )
+
+        preview = bulk_import_service.preview_sample_import(self.session, raw_payload)
+        self.assertEqual(preview.valid_rows, 2)
+        self.assertEqual(preview.rows[0].assigned_box_name, "Box 1")
+        self.assertEqual(preview.rows[0].assigned_position, "A2")
+        self.assertEqual(preview.rows[1].assigned_box_name, "Box 2")
+        self.assertEqual(preview.rows[1].assigned_position, "A2")
+
+        result = bulk_import_service.commit_sample_import(
+            self.session,
+            BulkSampleImportCommitInput(raw_payload=raw_payload, target_box_id=None),
+            self.user,
+        )
+
+        self.assertEqual(result.imported_rows, 2)
+        anchor = sample_service.get_sample_detail(
+            self.session,
+            sample_service.search_samples(self.session, SampleSearchQuery(q="S-300"))[0].id,
+        )
+        grouped = sample_service.get_sample_detail(
+            self.session,
+            sample_service.search_samples(self.session, SampleSearchQuery(q="S-301"))[0].id,
+        )
+        self.assertIn("Box 1", anchor.location_path)
+        self.assertEqual(anchor.location_label, "A2")
+        self.assertIn("Box 2", grouped.location_path)
+        self.assertEqual(grouped.location_label, "A2")
+
+    def test_bulk_sample_import_next_empty_can_use_page_level_target_box(self):
+        raw_payload = "\n".join(
+            [
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-310,Plasma,Sovary,1,00,1,current,1.0,mL,0,Target box fallback,03/10/26 08:00,,,next_empty,,",
             ]
         )
 
         preview = bulk_import_service.preview_sample_import(self.session, raw_payload, self.box.id)
+        self.assertEqual(preview.valid_rows, 1)
+        self.assertEqual(preview.rows[0].assigned_box_name, "Box 1")
+        self.assertEqual(preview.rows[0].assigned_position, "A1")
+
+    def test_bulk_sample_import_offset_placement_scans_left_to_right_then_top_to_bottom(self):
+        raw_payload = "\n".join(
+            [
+                "sample_id,sample_type,study,visit,timepoint,aliquot,study_role,volume,volume_units,thaw_count,notes,collection_at,box,position,placement_mode,placement_group,placement_offset",
+                "S-320,Plasma,Sovary,1,00,1,current,1.0,mL,0,Offset anchor,03/10/26 08:00,Box 1,A1,offset,7,0",
+                "S-321,Plasma,Sovary,1,00,2,current,1.0,mL,0,Offset one,03/10/26 08:01,,,offset,7,1",
+                "S-322,Plasma,Sovary,1,00,3,current,1.0,mL,0,Offset wrap,03/10/26 08:02,,,offset,7,2",
+            ]
+        )
+
+        preview = bulk_import_service.preview_sample_import(self.session, raw_payload)
+
         self.assertEqual(preview.valid_rows, 3)
-        self.assertEqual(preview.rows[0].assigned_box_name, "Box 2")
-        self.assertEqual(preview.rows[0].assigned_position, "A2")
-        self.assertEqual(preview.rows[1].assigned_box_name, "Box 2")
-        self.assertEqual(preview.rows[1].assigned_position, "A1")
+        self.assertEqual(preview.rows[0].assigned_position, "A1")
+        self.assertEqual(preview.rows[1].assigned_position, "B1")
+        self.assertEqual(preview.rows[2].assigned_position, "A2")
         self.assertEqual(preview.rows[2].assigned_box_name, "Box 1")
-        self.assertEqual(preview.rows[2].assigned_position, "A1")
-
-        result = bulk_import_service.commit_sample_import(
-            self.session,
-            BulkSampleImportCommitInput(raw_payload=raw_payload, target_box_id=self.box.id),
-            self.user,
-        )
-
-        self.assertEqual(result.imported_rows, 3)
-        row_box_explicit = sample_service.get_sample_detail(
-            self.session,
-            sample_service.search_samples(self.session, SampleSearchQuery(q="S-300"))[0].id,
-        )
-        row_box_sequential = sample_service.get_sample_detail(
-            self.session,
-            sample_service.search_samples(self.session, SampleSearchQuery(q="S-301"))[0].id,
-        )
-        fallback = sample_service.get_sample_detail(
-            self.session,
-            sample_service.search_samples(self.session, SampleSearchQuery(q="S-302"))[0].id,
-        )
-        self.assertIn("Box 2", row_box_explicit.location_path)
-        self.assertEqual(row_box_explicit.location_label, "A2")
-        self.assertIn("Box 2", row_box_sequential.location_path)
-        self.assertEqual(row_box_sequential.location_label, "A1")
-        self.assertIn("Box 1", fallback.location_path)
-        self.assertEqual(fallback.location_label, "A1")
 
     def test_sample_excel_template_contains_header_comments_and_roundtrips(self):
         workbook_bytes = bulk_import_service.sample_template_xlsx(
@@ -1509,58 +1659,244 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertEqual(sheet["A1"].value, "sample_id")
         self.assertEqual(workbook.sheetnames, ["Sample Import", "_lists"])
         self.assertEqual(lookup_sheet.sheet_state, "hidden")
-        self.assertEqual(sheet["A1"].alignment.horizontal, "center")
-        self.assertEqual(sheet["A1"].alignment.vertical, "center")
-        self.assertAlmostEqual(sheet.column_dimensions["A"].width, 11.265625)
-        self.assertAlmostEqual(sheet.column_dimensions["G"].width, 10.5)
-        self.assertAlmostEqual(sheet.column_dimensions["M"].width, 14.0)
+        self.assertAlmostEqual(sheet.column_dimensions["A"].width, 11.140625)
+        self.assertAlmostEqual(sheet.column_dimensions["N"].width, 18.5703125)
+        self.assertAlmostEqual(sheet.column_dimensions["O"].width, 24.140625)
         self.assertIsNotNone(sheet["A1"].comment)
-        self.assertIn("participant ID", sheet["A1"].comment.text)
+        self.assertIn("sample identifier", sheet["A1"].comment.text)
         self.assertEqual(sheet["G1"].value, "hemolysis")
-        self.assertIn("0 to 6 scale", sheet["G1"].comment.text)
-        self.assertEqual(sheet["A2"].alignment.horizontal, "center")
-        self.assertEqual(sheet["A2"].alignment.vertical, "center")
+        self.assertIn("1-7", sheet["G1"].comment.text)
+        self.assertIn("0.5 increments", sheet["G1"].comment.text)
         self.assertIsNone(sheet["A2"].comment)
-        self.assertEqual(sheet["L2"].alignment.horizontal, "left")
-        self.assertEqual(sheet["L2"].alignment.vertical, "top")
         self.assertIsNone(sheet["L2"].comment)
-        self.assertEqual(sheet["N1"].value, "box")
+        self.assertEqual(sheet["N1"].value, "placement_mode")
         self.assertIsNotNone(sheet["N1"].comment)
-        self.assertIn("Exact box name", sheet["N1"].comment.text)
+        self.assertIn("specific", sheet["N1"].comment.text)
+        self.assertEqual(sheet["O1"].value, "box")
+        self.assertIn("existing box name exactly as it appears in the system", sheet["O1"].comment.text)
+        self.assertEqual(sheet["P1"].value, "position")
+        self.assertIn("anchor row", sheet["P1"].comment.text)
+        self.assertEqual(sheet["Q1"].value, "placement_group")
+        self.assertIn("group ID", sheet["Q1"].comment.text)
+        self.assertEqual(sheet["R1"].value, "placement_offset")
+        self.assertIn("scan order", sheet["R1"].comment.text)
         self.assertIsNone(sheet["A2"].value)
         self.assertIsNone(sheet["M2"].value)
+        with ZipFile(BytesIO(workbook_bytes)) as archive:
+            vml = archive.read("xl/drawings/commentsDrawing1.vml").decode("utf-8")
+        widths = [int(value) for value in re.findall(r"width:(\d+)px", vml)]
+        heights = [int(value) for value in re.findall(r"height:(\d+)px", vml)]
+        self.assertGreater(len(set(widths)), 1)
+        self.assertGreater(max(widths), 300)
+        self.assertGreater(max(heights), 90)
         validations = list(sheet.data_validations.dataValidation)
         validation_formulas = {validation.formula1 for validation in validations}
         self.assertIn("'_lists'!$A$2:$A$3", validation_formulas)
         self.assertIn("'_lists'!$B$2:$B$3", validation_formulas)
         self.assertIn("'_lists'!$C$2:$C$3", validation_formulas)
+        self.assertIn('"1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7"', validation_formulas)
+        self.assertIn('"specific,next_empty,unplaced,grouped,offset"', validation_formulas)
+        self.assertIn("1", validation_formulas)
+        self.assertIn("0", validation_formulas)
+        self.assertTrue(any(str(validation.sqref) == "O2:O500" and validation.formula1 == "'_lists'!$C$2:$C$3" for validation in validations))
+        self.assertTrue(any(str(validation.sqref) == "G2:G500" and validation.formula1 == '"1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7"' for validation in validations))
         self.assertEqual(lookup_sheet["C2"].value, "Box 1")
         self.assertEqual(lookup_sheet["C3"].value, "Box 2")
-        with ZipFile(BytesIO(workbook_bytes)) as archive:
-            vml = archive.read("xl/drawings/commentsDrawing1.vml").decode("utf-8")
-        self.assertIn("width:190px;height:70px", vml)
-        self.assertIn("width:560px;height:110px", vml)
-        self.assertIn("width:540px;height:85px", vml)
 
         sheet["A3"] = "S-900"
         sheet["B3"] = "Plasma"
         sheet["C3"] = "Sovary"
-        sheet["G3"] = 3
+        sheet["G3"] = 3.5
         sheet["M3"] = "03/15/26 14:30"
-        sheet["N3"] = "Box 1"
-        sheet["O3"] = "A2"
+        sheet["N3"] = "specific"
+        sheet["O3"] = "Box 1"
+        sheet["P3"] = "A2"
         buffer = BytesIO()
         workbook.save(buffer)
 
         raw_payload = bulk_import_service.sample_workbook_to_csv(buffer.getvalue())
-        self.assertIn("sample_id,sample_type,study,visit,timepoint,aliquot,hemolysis", raw_payload)
-        self.assertIn("S-900,Plasma,Sovary,,,,3", raw_payload)
+        self.assertIn("sample_id,sample_type,study,visit,timepoint,aliquot,hemolysis,study_role,volume,volume_units,thaw_count,notes,collection_at,placement_mode,box,position,placement_group,placement_offset", raw_payload)
+        self.assertIn("S-900,Plasma,Sovary,,,,3.5,,,,,,03/15/26 14:30,specific,Box 1,A2", raw_payload)
+
+    def test_visit_workflow_configuration_and_template_generation(self):
+        template_workbook = Workbook()
+        template_workbook.active.title = "Instructions"
+        template_workbook["Instructions"]["A1"] = "IAS workflow"
+        template_workbook.create_sheet("sample_Import")
+        for column_index, header in enumerate(bulk_import_service.SAMPLE_HEADERS, start=1):
+            template_workbook["sample_Import"].cell(row=1, column=column_index, value=header)
+        template_buffer = BytesIO()
+        template_workbook.save(template_buffer)
+
+        workflow = visit_service.save_workflow_config(
+            self.session,
+            self.study.id,
+            StudyWorkflowConfigInput(
+                label="Sovary Visit Workflow",
+                description="Main visit execution",
+                is_active=True,
+                quick_links=[
+                    {"label": "Biochem / Lipid Results", "url": "https://example.com/biochem.xlsx"},
+                    {"label": "Dilution Calculator", "url": "https://example.com/dilution.xlsx"},
+                ],
+            ),
+            template_filename="ias-visit-template.xlsx",
+            template_bytes=template_buffer.getvalue(),
+        )
+        self.assertTrue(workflow.is_active)
+        self.assertEqual(workflow.quick_links[0].label, "Biochem / Lipid Results")
+        self.assertEqual(workflow.template_workbook_filename, "ias-visit-template.xlsx")
+
+        session = visit_service.create_visit_session(
+            self.session,
+            VisitSessionCreateInput(
+                study_id=self.study.id,
+                participant_id="PT-001",
+                visit_date=datetime(2026, 3, 28, 9, 0),
+            ),
+            self.user,
+        )
+        filename, workbook_bytes = visit_service.generate_visit_template_xlsx(self.session, session.id)
+        workbook = load_workbook(filename=BytesIO(workbook_bytes))
+        self.assertEqual(filename, "ias-visit-template.xlsx")
+        self.assertEqual(workbook.sheetnames, ["Instructions", "sample_Import"])
+        self.assertEqual(workbook["Instructions"]["A1"].value, "IAS workflow")
+        self.assertEqual(workbook["sample_Import"]["A1"].value, "sample_id")
+
+    def test_visit_workflow_preview_commit_and_complete(self):
+        visit_service.save_workflow_config(
+            self.session,
+            self.study.id,
+            StudyWorkflowConfigInput(
+                label="Sovary Visit Workflow",
+                description="Main visit execution",
+                is_active=True,
+                quick_links=[
+                    {"label": "Biochem / Lipid Results", "url": "https://example.com/biochem.xlsx"},
+                    {"label": "Dilution Calculator", "url": "https://example.com/dilution.xlsx"},
+                ],
+            ),
+        )
+        session = visit_service.create_visit_session(
+            self.session,
+            VisitSessionCreateInput(
+                study_id=self.study.id,
+                participant_id="PT-002",
+                visit_date=datetime(2026, 3, 28, 10, 0),
+            ),
+            self.user,
+        )
+        visit_service.update_visit_notes(self.session, session.id, VisitSessionNotesInput(notes="Participant tolerated draw well."))
+        _filename, workbook_bytes = visit_service.generate_visit_template_xlsx(self.session, session.id)
+        workbook = load_workbook(filename=BytesIO(workbook_bytes))
+        sample_sheet = workbook["sample_Import"]
+        sample_sheet["A2"] = "VIS-001"
+        sample_sheet["B2"] = "Plasma"
+        sample_sheet["F2"] = 1
+        sample_sheet["G2"] = 1
+        sample_sheet["I2"] = 1.2
+        sample_sheet["K2"] = 0
+        sample_sheet["L2"] = "Fresh draw"
+        sample_sheet["M2"] = "03/28/26 10:15"
+        sample_sheet["N2"] = "Box 1"
+        sample_sheet["O2"] = "A1"
+        sample_sheet["P2"] = "specific"
+        buffer = BytesIO()
+        workbook.save(buffer)
+
+        raw_payload = visit_service.visit_workbook_to_payload(buffer.getvalue(), uploaded_filename="visit-session.xlsx")
+        preview = visit_service.preview_visit_workbook(
+            self.session,
+            session.id,
+            raw_payload,
+            persist=True,
+            uploaded_filename="visit-session.xlsx",
+        )
+        self.assertEqual(preview.sample_preview.valid_rows, 1)
+
+        result = visit_service.commit_visit_workbook(
+            self.session,
+            session.id,
+            raw_payload,
+            uploaded_filename="visit-session.xlsx",
+            user=self.user,
+        )
+        self.assertEqual(result.imported_rows, 1)
+        committed_session = visit_service.get_visit_session(self.session, session.id)
+        self.assertEqual(committed_session.imported_rows, 1)
+        self.assertEqual(committed_session.session_notes, "Participant tolerated draw well.")
+        self.assertEqual(committed_session.status, "completed")
+        self.assertEqual(len(committed_session.created_samples), 1)
+        created_sample = sample_service.get_sample_detail(self.session, committed_session.created_samples[0].sample_id)
+        self.assertEqual(created_sample.sample_id, "VIS-001")
+        self.assertEqual(created_sample.location_label, "A1")
+
+        completed = visit_service.complete_visit_session(
+            self.session,
+            session.id,
+            VisitSessionCompleteInput(),
+        )
+        self.assertEqual(completed.status, "completed")
+        reviewed = visit_service.mark_summary_reviewed(self.session, session.id)
+        self.assertIn("summary_reviewed_at", reviewed.step_status)
+
+    def test_visit_workflow_preview_rejects_missing_sample_import_sheet(self):
+        visit_service.save_workflow_config(
+            self.session,
+            self.study.id,
+            StudyWorkflowConfigInput(
+                label="Sovary Visit Workflow",
+                is_active=True,
+            ),
+        )
+        session = visit_service.create_visit_session(
+            self.session,
+            VisitSessionCreateInput(
+                study_id=self.study.id,
+                participant_id="PT-003",
+                visit_date=datetime(2026, 3, 28, 11, 0),
+            ),
+            self.user,
+        )
+        workbook = Workbook()
+        workbook.active.title = "Instructions"
+        workbook["Instructions"]["A1"] = "Missing sample import"
+        buffer = BytesIO()
+        workbook.save(buffer)
+
+        with self.assertRaises(visit_service.VisitWorkflowError):
+            visit_service.visit_workbook_to_payload(buffer.getvalue(), uploaded_filename="bad.xlsx")
+
+    def test_visit_workflow_completion_without_samples_allows_blank_note(self):
+        visit_service.save_workflow_config(
+            self.session,
+            self.study.id,
+            StudyWorkflowConfigInput(
+                label="Sovary Visit Workflow",
+                is_active=True,
+            ),
+        )
+        session = visit_service.create_visit_session(
+            self.session,
+                VisitSessionCreateInput(
+                    study_id=self.study.id,
+                    participant_id="PT-004",
+                    visit_date=datetime(2026, 3, 28, 12, 0),
+                ),
+                self.user,
+            )
+        completed = visit_service.complete_visit_session(
+            self.session,
+            session.id,
+            VisitSessionCompleteInput(),
+        )
+        self.assertEqual(completed.status, "completed")
 
     def test_bulk_box_import_creates_box_under_existing_shelf(self):
         raw_payload = "\n".join(
             [
-                "parent,box,rows,cols,box_nickname,notes",
-                "Freezer A > Shelf 1,Box 20,2,3,Study set,Created in bulk",
+                "parent,box,rows,cols,notes",
+                "Freezer A > Shelf 1,Box 20,2,3,Created in bulk",
             ]
         )
 
@@ -1578,7 +1914,6 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         nodes = storage_service.list_all_nodes(self.session)
         box = next(node for node in nodes if node.node_type.value == "box" and node.name == "Box 20")
         self.assertEqual(box.parent_id, self.shelf.id)
-        self.assertEqual(box.nickname, "Study set")
         self.assertEqual(box.notes, "Created in bulk")
         self.assertEqual(len(storage_service.get_box_view(self.session, box.id).positions), 6)
 
@@ -1591,9 +1926,9 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertIsNotNone(existing_rack)
         raw_payload = "\n".join(
             [
-                "parent,box,rows,cols,box_nickname,notes",
-                "Freezer A > Shelf 1,Box Path Shelf,2,2,,Created from shelf path",
-                "Freezer A > Shelf 1 > Rack Path,Box Path Rack,2,2,,Created from rack path",
+                "parent,box,rows,cols,notes",
+                "Freezer A > Shelf 1,Box Path Shelf,2,2,Created from shelf path",
+                "Freezer A > Shelf 1 > Rack Path,Box Path Rack,2,2,Created from rack path",
             ]
         )
 
@@ -1616,12 +1951,45 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertEqual(shelf_box.parent_id, self.shelf.id)
         self.assertEqual(rack_box.parent_id, existing_rack.id)
 
+    def test_storage_tree_includes_box_capacity_counts(self):
+        self.create_and_place_sample("TREE-001", position_id=self.positions[0].id)
+        self.create_and_place_sample("TREE-002", position_id=self.positions[1].id)
+
+        tree = storage_service.list_storage_tree(self.session)
+        freezer = next(node for node in tree if node.name == "Freezer A")
+        box = freezer.children[0].children[0].children[0]
+
+        self.assertEqual(box.node_type, "box")
+        self.assertEqual(box.display_name, "Box 1")
+        self.assertEqual(box.filled_positions, 2)
+        self.assertEqual(box.total_positions, 4)
+        self.assertEqual(box.path, "Freezer A/Shelf 1/Rack 1/Box 1")
+
+    def test_storage_box_search_returns_boxes_only(self):
+        storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Plasma Box 9", node_type="box", parent_id=self.rack.id),
+            self.user,
+        )
+        storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Rack Plasma", node_type="rack", parent_id=self.shelf.id),
+            self.user,
+        )
+
+        results = storage_service.search_boxes(self.session, "plasma")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].node_type, "box")
+        self.assertEqual(results[0].name, "Plasma Box 9")
+        self.assertIn("Plasma Box 9", results[0].path)
+
     def test_bulk_box_import_rejects_invalid_parent_and_duplicate_box(self):
         raw_payload = "\n".join(
             [
-                "parent,box,rows,cols,box_nickname,notes",
-                "Freezer A,Box 30,2,2,,Parent too shallow",
-                "Freezer A > Shelf 1,Box 1,0,2,,Duplicate and invalid dimensions",
+                "parent,box,rows,cols,notes",
+                "Freezer A,Box 30,2,2,Parent too shallow",
+                "Freezer A > Shelf 1,Box 1,0,2,Duplicate and invalid dimensions",
             ]
         )
 
@@ -1661,7 +2029,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         workbook.save(buffer)
 
         raw_payload = bulk_import_service.box_workbook_to_csv(buffer.getvalue())
-        self.assertIn("parent,box,rows,cols,box_nickname,notes", raw_payload)
+        self.assertIn("parent,box,rows,cols,notes", raw_payload)
         self.assertIn("Freezer A > Shelf 1,Box 99,2,3", raw_payload)
 
 

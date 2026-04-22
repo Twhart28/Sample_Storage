@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -46,89 +48,75 @@ SAMPLE_HEADERS = [
     "thaw_count",
     "notes",
     "collection_at",
+    "placement_mode",
     "box",
     "position",
+    "placement_group",
+    "placement_offset",
 ]
 BOX_HEADERS = [
     "parent",
     "box",
     "rows",
     "cols",
-    "box_nickname",
     "notes",
 ]
 DATE_FORMAT = "%m/%d/%y %H:%M"
 VALID_STUDY_ROLES = {"current", "retired"}
+VALID_PLACEMENT_MODES = {"specific", "next_empty", "unplaced", "grouped", "offset"}
+HEMOLYSIS_ALLOWED_VALUES = [f"{value:g}" for value in [1 + (index * 0.5) for index in range(13)]]
+HEMOLYSIS_VALIDATION_FORMULA = '"' + ",".join(HEMOLYSIS_ALLOWED_VALUES) + '"'
 SAMPLE_ENTRY_ROWS = 500
 BOX_ENTRY_ROWS = 500
 PATH_SEPARATOR = " > "
-SAMPLE_HEADER_COMMENT_SIZES = {
-    "sample_id": (190, 70),
-    "sample_type": (220, 70),
-    "study": (250, 85),
-    "visit": (470, 95),
-    "timepoint": (560, 110),
-    "aliquot": (300, 85),
-    "hemolysis": (360, 85),
-    "study_role": (260, 70),
-    "volume": (360, 85),
-    "volume_units": (340, 70),
-    "thaw_count": (470, 85),
-    "notes": (220, 70),
-    "collection_at": (230, 85),
-    "box": (350, 70),
-    "position": (540, 85),
-}
+SAMPLE_TEMPLATE_ASSET_PATH = Path(__file__).resolve().parents[1] / "assets" / "sample-import-template.xlsx"
 SAMPLE_TEMPLATE_WIDTHS = {
-    "A": 11.265625,
-    "B": 12.0,
-    "C": 7.86328125,
-    "D": 5.59765625,
-    "E": 9.265625,
-    "F": 7.1328125,
-    "G": 10.5,
-    "H": 12.06640625,
-    "I": 8.796875,
-    "J": 12.53125,
-    "K": 11.19921875,
-    "L": 10.53125,
-    "M": 14.0,
-    "N": 10.19921875,
-    "O": 9.73046875,
+    "A": 11.140625,
+    "B": 13.42578125,
+    "C": 8.42578125,
+    "D": 7.0,
+    "E": 10.85546875,
+    "F": 8.0,
+    "G": 10.42578125,
+    "H": 11.28515625,
+    "I": 8.5703125,
+    "J": 13.85546875,
+    "K": 12.28515625,
+    "L": 11.0,
+    "M": 13.5703125,
+    "N": 18.5703125,
+    "O": 24.140625,
+    "P": 9.0,
+    "Q": 17.7109375,
+    "R": 18.0,
 }
-SAMPLE_CENTERED_ENTRY_COLUMNS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "M", "N", "O"]
+SAMPLE_CENTERED_ENTRY_COLUMNS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "M", "N", "O", "P", "Q", "R"]
 SAMPLE_HEADER_COMMENTS = {
-    "sample_id": "Required.\nThe participant ID.\nThis may repeat across samples when type, visit, timepoint, or aliquot differ.\nExample: IAS028",
-    "sample_type": "Required.\nThe sample type.\nExample: Plasma, Serum, etc.",
-    "study": "Optional.\nThe configured study name for the sample.\nExample: IAS, NRS, etc.",
-    "visit": "Optional.\nThe visit number. Numbers only.\nUsually only used when the timepoint is reused across multiple visits.\nExample: 1, 2, ...",
-    "timepoint": "Optional.\nThe collection timepoint. Numbers only.\nThis can distinguish visits or multiple collections within one visit, such as an OGTT.\nExample: 1, 2, 00, 15, 60, etc.",
-    "aliquot": "Optional.\nThe sample aliquot number. Whole numbers only.\nExample: 1, 2, ...",
-    "hemolysis": "Optional.\nHemolysis Classification # on a 0 to 6 scale. Whole numbers only.",
-    "study_role": "Optional.\nAllowed values: current, retired. Defaults to current.",
-    "volume": "Optional.\nCurrent remaining volume in the tube. Number input only.\nExample: 1.2, 3.00, etc.",
-    "volume_units": "Optional.\nAllowed values are mL or uL. Defaults to mL if blank.",
-    "thaw_count": "Optional.\nNumber of times the sample has been thawed. Whole numbers only. Defaults to 0 if blank.",
-    "notes": "Optional.\nFree text notes about the sample.",
-    "collection_at": f"Required.\nFormat: {DATE_FORMAT}.\nExample: 03/15/26 14:30",
-    "box": "Optional.\nExact box name. Must match an existing unique box name.",
-    "position": "Optional.\nPosition label inside the selected box, such as A1. Leave blank for sequential fill into the next empty slot.",
-}
-BOX_HEADER_COMMENT_SIZES = {
-    "parent": (430, 110),
-    "box": (260, 80),
-    "rows": (260, 80),
-    "cols": (260, 80),
-    "box_nickname": (300, 80),
-    "notes": (260, 80),
+    "sample_id": "Required.\nEnter the sample identifier for this row.\nThis is part of the sample's identity and is checked for duplicates together with sample_type, visit, timepoint, and aliquot.\nEx: IAS028, NRS28",
+    "sample_type": "Required.\nEnter the configured sample type exactly as listed in the system.\nThis tells the importer what kind of sample is being created.\nEx: Plasma, Serum, PBMC",
+    "study": "Optional.\nEnter the study name if this sample should be linked to a study.\nLeave blank if no study should be assigned.\nEx: IAS, NRS",
+    "visit": "Optional.\nNumber input only.\nUse this when the sample belongs to a specific visit number.",
+    "timepoint": "Optional.\nNumber input only.\nUse this to identify when within the visit or protocol the sample was collected.",
+    "aliquot": "Optional.\nNatural number input only.\nUse this to distinguish multiple aliquots of the same sample set.",
+    "hemolysis": "Optional.\nNumbers between 1-7 only (can use 0.5 increments).\nEnter the hemolysis classification if known using the CDC hemolysis palette; 1 is the lowest classification and 7 is the highest.\nReference: https://www.cdc.gov/vector-borne-diseases/php/laboratories/reference-tool-for-hemolysis-status.html",
+    "study_role": "Optional.\nAllowed values: current or retired.\nUse this to mark whether the sample is the current preferred study sample or an older retained one.\nBlank defaults to current.",
+    "volume": "Optional.\nNumber only.\nEnter the current sample volume if it is known.\nUse the next column for units.",
+    "volume_units": "Optional.\nAllowed values: mL or uL.\nUse this with volume.\nBlank defaults to mL.",
+    "thaw_count": "Optional.\nWhole numbers only.\nEnter how many times the sample has already been thawed.\nBlank defaults to 0.",
+    "notes": "Optional.\nFree text.\nUse this for any useful sample-specific note you want saved with the record.",
+    "collection_at": "Required.\nEnter the collection date and time using MM/DD/YY HH:MM.\nThis is when the sample was collected.",
+    "placement_mode": "Required.\nChooses how each sample will be placed.\nUse specific for most rows; the other modes are for batch placement patterns (details below).\nSpecific: When the exact freezer location is known; requires box + position.\nnext_empty: When the sample should go into the next open slot in a box; requires box only and blank position.\nUnplaced: When creating a sample without a freezer location; leave box and position blank.\nGrouped: When related samples should use the same position across different boxes; requires the same placement_group on all related rows and one anchor row with box + position.\nOffset: When related samples should stay in the same box but shift positions from an anchor; requires the same placement_group on all related rows, one anchor row with box + position, and placement_offset on non-anchor rows.",
+    "box": "Required only for placement modes that use a freezer box.\nEnter the existing box name exactly as it appears in the system.\nLeave blank for unplaced.",
+    "position": "Required for specific, and used only on the anchor row for grouped or offset.\nLeave blank for next_empty, unplaced, and non-anchor grouped/offset rows.",
+    "placement_group": "Required for grouped and offset.\nEnter a whole-number group ID so related rows are treated as one placement set.",
+    "placement_offset": "Required only for non-anchor offset rows.\nEnter a whole number 0 or greater to shift placement forward from the anchor position in box scan order.",
 }
 BOX_TEMPLATE_WIDTHS = {
     "A": 32.0,
     "B": 18.0,
     "C": 8.0,
     "D": 8.0,
-    "E": 18.0,
-    "F": 28.0,
+    "E": 28.0,
 }
 BOX_CENTERED_ENTRY_COLUMNS = ["A", "B", "C", "D"]
 BOX_HEADER_COMMENTS = {
@@ -136,7 +124,6 @@ BOX_HEADER_COMMENTS = {
     "box": "Required.\nThe new unique box name to create.",
     "rows": "Required.\nNumber of box rows. Whole numbers only and must be greater than zero.",
     "cols": "Required.\nNumber of box columns. Whole numbers only and must be greater than zero.",
-    "box_nickname": "Optional.\nSecondary display label for the box, shown in parentheses after the true name.",
     "notes": "Optional.\nFree text notes to store on the box.",
 }
 
@@ -161,64 +148,28 @@ class PositionPlan:
     occupied_labels: set[str]
 
 
-def sample_template_csv() -> str:
-    return ",".join(SAMPLE_HEADERS) + "\n"
-
-
 def sample_template_xlsx(
     sample_types: list[str] | None = None,
     studies: list[str] | None = None,
     boxes: list[str] | None = None,
 ) -> bytes:
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Sample Import"
-    sheet.freeze_panes = "A2"
-
-    header_fill = PatternFill(fill_type="solid", fgColor="1F5C4B")
-    header_font = Font(color="FFFFFF", bold=True)
-    header_alignment = Alignment(horizontal="center", vertical="center")
-    centered_entry_alignment = Alignment(horizontal="center", vertical="center")
-    notes_entry_alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-
-    for index, header in enumerate(SAMPLE_HEADERS, start=1):
-        cell = sheet.cell(row=1, column=index, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = header_alignment
-        cell.comment = Comment(SAMPLE_HEADER_COMMENTS.get(header, ""), "Sample Storage")
-        cell.comment.width, cell.comment.height = SAMPLE_HEADER_COMMENT_SIZES.get(header, (240, 80))
-        sheet.column_dimensions[cell.column_letter].width = SAMPLE_TEMPLATE_WIDTHS.get(cell.column_letter, 16)
-
-    for row_index in range(2, SAMPLE_ENTRY_ROWS + 1):
-        for column_letter in SAMPLE_CENTERED_ENTRY_COLUMNS:
-            sheet[f"{column_letter}{row_index}"].alignment = centered_entry_alignment
-        sheet[f"L{row_index}"].alignment = notes_entry_alignment
-
-    study_role_validation = DataValidation(
-        type="list",
-        formula1='"current,retired"',
-        allow_blank=True,
-    )
-    study_role_validation.error = "Use current or retired."
-    sheet.add_data_validation(study_role_validation)
-    study_role_validation.add("H2:H500")
-
-    volume_units_validation = DataValidation(
-        type="list",
-        formula1='"mL,uL"',
-        allow_blank=True,
-    )
-    volume_units_validation.error = "Use mL or uL."
-    sheet.add_data_validation(volume_units_validation)
-    volume_units_validation.add("J2:J500")
-
-    lookup_sheet = workbook.create_sheet("_lists")
+    workbook = load_workbook(filename=SAMPLE_TEMPLATE_ASSET_PATH)
+    if "Placement Help" in workbook.sheetnames:
+        del workbook["Placement Help"]
+    sheet = workbook["Sample Import"]
+    lookup_sheet = workbook["_lists"] if "_lists" in workbook.sheetnames else workbook.create_sheet("_lists")
     lookup_sheet.sheet_state = "hidden"
+    _ensure_sample_template_header_comments(sheet)
+    for column_letter, width in SAMPLE_TEMPLATE_WIDTHS.items():
+        sheet.column_dimensions[column_letter].width = width
 
     sample_types = [value for value in (sample_types or []) if value]
     studies = [value for value in (studies or []) if value]
     boxes = [value for value in (boxes or []) if value]
+
+    for row in lookup_sheet.iter_rows():
+        for cell in row:
+            cell.value = None
 
     lookup_sheet["A1"] = "sample_types"
     for index, value in enumerate(sample_types, start=2):
@@ -231,6 +182,64 @@ def sample_template_xlsx(
     lookup_sheet["C1"] = "boxes"
     for index, value in enumerate(boxes, start=2):
         lookup_sheet.cell(row=index, column=3, value=value)
+
+    sheet.data_validations.dataValidation = []
+
+    study_role_validation = DataValidation(
+        type="list",
+        formula1='"current,retired"',
+        allow_blank=True,
+    )
+    study_role_validation.error = "Use current or retired."
+    sheet.add_data_validation(study_role_validation)
+    study_role_validation.add("H2:H500")
+
+    hemolysis_validation = DataValidation(
+        type="list",
+        formula1=HEMOLYSIS_VALIDATION_FORMULA,
+        allow_blank=True,
+    )
+    hemolysis_validation.error = "Use a hemolysis value from 1 to 7 in 0.5 increments."
+    sheet.add_data_validation(hemolysis_validation)
+    hemolysis_validation.add("G2:G500")
+
+    volume_units_validation = DataValidation(
+        type="list",
+        formula1='"mL,uL"',
+        allow_blank=True,
+    )
+    volume_units_validation.error = "Use mL or uL."
+    sheet.add_data_validation(volume_units_validation)
+    volume_units_validation.add("J2:J500")
+
+    placement_mode_validation = DataValidation(
+        type="list",
+        formula1='"specific,next_empty,unplaced,grouped,offset"',
+        allow_blank=False,
+    )
+    placement_mode_validation.error = "Use specific, next_empty, unplaced, grouped, or offset."
+    sheet.add_data_validation(placement_mode_validation)
+    placement_mode_validation.add("N2:N500")
+
+    placement_group_validation = DataValidation(
+        type="whole",
+        operator="greaterThanOrEqual",
+        formula1="1",
+        allow_blank=True,
+    )
+    placement_group_validation.error = "Use a whole number greater than or equal to 1."
+    sheet.add_data_validation(placement_group_validation)
+    placement_group_validation.add("Q2:Q500")
+
+    placement_offset_validation = DataValidation(
+        type="whole",
+        operator="greaterThanOrEqual",
+        formula1="0",
+        allow_blank=True,
+    )
+    placement_offset_validation.error = "Use a whole number greater than or equal to 0."
+    sheet.add_data_validation(placement_offset_validation)
+    placement_offset_validation.add("R2:R500")
 
     if sample_types:
         sample_type_formula = f"'_lists'!$A$2:$A${len(sample_types) + 1}"
@@ -251,13 +260,34 @@ def sample_template_xlsx(
         box_validation = DataValidation(type="list", formula1=box_formula, allow_blank=True)
         box_validation.error = "Choose a box from the configured list."
         sheet.add_data_validation(box_validation)
-        box_validation.add(f"N2:N{SAMPLE_ENTRY_ROWS}")
+        box_validation.add(f"O2:O{SAMPLE_ENTRY_ROWS}")
 
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
 
 
+def _ensure_sample_template_header_comments(sheet) -> None:
+    for index, header in enumerate(SAMPLE_HEADERS, start=1):
+        cell = sheet.cell(row=1, column=index)
+        cell.value = header
+        comment_text = SAMPLE_HEADER_COMMENTS.get(header)
+        if comment_text:
+            cell.comment = Comment(comment_text, "Sample Storage")
+            _autosize_comment(cell.comment)
+        else:
+            cell.comment = None
+
+
+def _autosize_comment(comment: Comment) -> None:
+    lines = (comment.text or "").splitlines() or [""]
+    longest_line = max(len(line) for line in lines)
+    width = min(max(220, int(longest_line * 7.2) + 28), 560)
+    chars_per_line = max(24, int((width - 28) / 7.2))
+    visual_line_count = sum(max(1, math.ceil(len(line) / chars_per_line)) for line in lines)
+    height = min(max(90, visual_line_count * 18 + 28), 420)
+    comment.width = width
+    comment.height = height
 def workbook_to_csv(file_bytes: bytes) -> str:
     workbook = load_workbook(filename=BytesIO(file_bytes), data_only=True)
     sheet = workbook.active
@@ -311,13 +341,13 @@ def box_template_xlsx(
         cell.font = header_font
         cell.alignment = header_alignment
         cell.comment = Comment(BOX_HEADER_COMMENTS.get(header, ""), "Sample Storage")
-        cell.comment.width, cell.comment.height = BOX_HEADER_COMMENT_SIZES.get(header, (260, 80))
+        _autosize_comment(cell.comment)
         sheet.column_dimensions[cell.column_letter].width = BOX_TEMPLATE_WIDTHS.get(cell.column_letter, 18)
 
     for row_index in range(2, BOX_ENTRY_ROWS + 1):
         for column_letter in BOX_CENTERED_ENTRY_COLUMNS:
             sheet[f"{column_letter}{row_index}"].alignment = centered_entry_alignment
-        for column_letter in ("E", "F"):
+        for column_letter in ("E",):
             sheet[f"{column_letter}{row_index}"].alignment = notes_entry_alignment
 
     lookup_sheet = workbook.create_sheet("_lists")
@@ -357,7 +387,7 @@ def box_workbook_to_csv(file_bytes: bytes) -> str:
 
 
 def preview_sample_import(db: Session, raw_payload: str, target_box_id: int | None = None) -> BulkSampleImportPreview:
-    table = _parse_table(raw_payload, SAMPLE_HEADERS, {"sample_id"})
+    table = _parse_table(raw_payload, SAMPLE_HEADERS, {"sample_id", "placement_mode"})
     preview = BulkSampleImportPreview(
         raw_payload=raw_payload,
         headers=table.headers,
@@ -388,6 +418,9 @@ def preview_sample_import(db: Session, raw_payload: str, target_box_id: int | No
             collection_at=row.get("collection_at"),
             box=row.get("box"),
             position=row.get("position"),
+            placement_mode=row.get("placement_mode"),
+            placement_group=row.get("placement_group"),
+            placement_offset=row.get("placement_offset"),
         )
         for index, row in enumerate(table.rows)
     ]
@@ -401,7 +434,9 @@ def preview_sample_import(db: Session, raw_payload: str, target_box_id: int | No
         return preview
 
     explicit_positions_by_box: dict[int, set[str]] = {}
-    valid_without_position_by_box: dict[int, list[BulkSampleImportRow]] = {}
+    next_empty_rows_by_box: dict[int, list[BulkSampleImportRow]] = {}
+    grouped_rows_by_group: dict[int, list[BulkSampleImportRow]] = {}
+    offset_rows_by_group: dict[int, list[BulkSampleImportRow]] = {}
     for row in preview.rows:
         _validate_sample_row(
             row,
@@ -414,27 +449,25 @@ def preview_sample_import(db: Session, raw_payload: str, target_box_id: int | No
             default_target_box_id=target_box_id,
         )
         resolved_plan = _resolve_plan_for_row(box_plan_lookup, row.box, target_box_id)
-        if row.valid and resolved_plan is not None and not row.position:
-            valid_without_position_by_box.setdefault(resolved_plan.box_id, []).append(row)
-
-    for box_id, valid_without_position in valid_without_position_by_box.items():
-        position_plan = box_plan_lookup.get(box_id)
-        if position_plan is None:
+        if not row.valid:
             continue
-        available_labels = [
-            label
-            for label, position in sorted(position_plan.positions_by_label.items(), key=lambda item: (item[1].row, item[1].col))
-            if label not in position_plan.occupied_labels and label not in explicit_positions_by_box.get(box_id, set())
-        ]
-        for row in valid_without_position:
-            if not available_labels:
-                row.errors.append("No open positions remain for sequential fill")
-                row.valid = False
-                row.status = "invalid"
-                continue
-            row.assigned_box_name = position_plan.box_name
-            row.assigned_position = available_labels.pop(0)
-            row.status = "valid"
+        if row.placement_mode == "next_empty" and resolved_plan is not None:
+            next_empty_rows_by_box.setdefault(resolved_plan.box_id, []).append(row)
+        elif row.placement_mode == "grouped":
+            group_id = _parse_int(row.placement_group)
+            if group_id is not None:
+                grouped_rows_by_group.setdefault(group_id, []).append(row)
+        elif row.placement_mode == "offset":
+            group_id = _parse_int(row.placement_group)
+            if group_id is not None:
+                offset_rows_by_group.setdefault(group_id, []).append(row)
+
+    explicit_positions_by_box = _reserved_positions(preview.rows, box_plan_lookup)
+    _resolve_grouped_rows(grouped_rows_by_group, box_plan_lookup, explicit_positions_by_box, target_box_id)
+    explicit_positions_by_box = _reserved_positions(preview.rows, box_plan_lookup)
+    _resolve_offset_rows(offset_rows_by_group, box_plan_lookup, explicit_positions_by_box, target_box_id)
+    explicit_positions_by_box = _reserved_positions(preview.rows, box_plan_lookup)
+    _resolve_next_empty_rows(next_empty_rows_by_box, box_plan_lookup, explicit_positions_by_box)
     _finalize_preview_counts(preview)
     return preview
 
@@ -471,7 +504,7 @@ def commit_sample_import(
                 visit_label=row.visit,
                 timepoint_label=row.timepoint,
                 aliquot_number=_parse_int(row.aliquot),
-                hemolysis_classification=_parse_int(row.hemolysis),
+                hemolysis_classification=_parse_float(row.hemolysis),
                 study_role=(row.study_role or "current"),
                 volume=_parse_float(row.volume),
                 volume_units=row.volume_units or "mL",
@@ -511,7 +544,6 @@ def preview_box_import(db: Session, raw_payload: str) -> BulkBoxImportPreview:
             box=row.get("box"),
             rows=row.get("rows"),
             cols=row.get("cols"),
-            box_nickname=row.get("box_nickname"),
             notes=row.get("notes"),
         )
         for index, row in enumerate(table.rows)
@@ -564,7 +596,6 @@ def commit_box_import(
                 db,
                 StorageNodeCreate(
                     name=row.box or "",
-                    nickname=row.box_nickname,
                     notes=row.notes,
                     node_type="box",
                     parent_id=parent.id,
@@ -626,6 +657,11 @@ def _validate_sample_row(
     explicit_positions_by_box: dict[int, set[str]],
     default_target_box_id: int | None,
 ) -> None:
+    row.placement_mode = _clean_value(row.placement_mode)
+    if row.placement_mode:
+        row.placement_mode = row.placement_mode.lower()
+    row.placement_group = _clean_value(row.placement_group)
+    row.placement_offset = _clean_value(row.placement_offset)
     sample_id = (row.sample_id or "").strip()
     if not sample_id:
         row.errors.append("Sample ID is required")
@@ -644,8 +680,15 @@ def _validate_sample_row(
         row.errors.append("Study role must be current or retired")
     if row.aliquot and _parse_int(row.aliquot) is None:
         row.errors.append("Aliquot must be a whole number")
-    if row.hemolysis and (_parse_int(row.hemolysis) is None or not 0 <= (_parse_int(row.hemolysis) or 0) <= 6):
-        row.errors.append("Hemolysis must be a whole number from 0 to 6")
+    if row.hemolysis:
+        hemolysis_value = _parse_float(row.hemolysis)
+        if hemolysis_value is None:
+            row.errors.append("Hemolysis must be between 1 and 7 in 0.5 increments")
+        else:
+            try:
+                sample_service._normalize_hemolysis(hemolysis_value)
+            except sample_service.SampleError as exc:
+                row.errors.append(str(exc))
     if row.thaw_count and (_parse_int(row.thaw_count) is None or (_parse_int(row.thaw_count) or 0) < 0):
         row.errors.append("Thaw count must be zero or greater")
     if row.volume and (_parse_float(row.volume) is None or (_parse_float(row.volume) or 0) < 0):
@@ -656,6 +699,24 @@ def _validate_sample_row(
         row.errors.append("Collection date is required")
     elif _parse_datetime(row.collection_at) is None:
         row.errors.append(f"Collection date must use {DATE_FORMAT}")
+    if not row.placement_mode:
+        row.errors.append("Placement mode is required")
+    elif row.placement_mode not in VALID_PLACEMENT_MODES:
+        row.errors.append("Placement mode must be specific, next_empty, unplaced, grouped, or offset")
+    placement_group_value = _parse_int(row.placement_group)
+    if row.placement_group and placement_group_value is None:
+        row.errors.append("Placement group must be a whole number")
+    elif placement_group_value is not None and placement_group_value <= 0:
+        row.errors.append("Placement group must be greater than zero")
+    if row.placement_group and row.placement_mode not in {"grouped", "offset"}:
+        row.errors.append("Placement group can only be used when placement mode is grouped or offset")
+    placement_offset_value = _parse_int(row.placement_offset)
+    if row.placement_offset and placement_offset_value is None:
+        row.errors.append("Placement offset must be a whole number")
+    elif placement_offset_value is not None and placement_offset_value < 0:
+        row.errors.append("Placement offset must be zero or greater")
+    if row.placement_offset and row.placement_mode != "offset":
+        row.errors.append("Placement offset can only be used when placement mode is offset")
 
     sample_type = sample_type_map.get((row.sample_type or "").lower()) if row.sample_type else None
     identity_key = None
@@ -675,13 +736,15 @@ def _validate_sample_row(
     position_plan = _resolve_plan_for_row(box_plan_lookup, row.box, default_target_box_id)
     if row.box and position_plan is None:
         row.errors.append("Box was not found")
-    elif position_plan is not None:
+    elif position_plan is not None and row.placement_mode != "unplaced":
         row.assigned_box_name = position_plan.box_name
 
-    if row.position:
+    if row.placement_mode == "specific":
         if position_plan is None:
-            row.errors.append("Position can only be used when a box is resolved")
-        else:
+            row.errors.append("A box is required when placement mode is specific")
+        if not row.position:
+            row.errors.append("Position is required when placement mode is specific")
+        elif position_plan is not None:
             label = row.position.upper()
             explicit_positions = explicit_positions_by_box.setdefault(position_plan.box_id, set())
             if label not in position_plan.positions_by_label:
@@ -694,9 +757,230 @@ def _validate_sample_row(
                 row.assigned_box_name = position_plan.box_name
                 row.assigned_position = label
                 explicit_positions.add(label)
+    elif row.placement_mode == "unplaced":
+        if row.box:
+            row.errors.append("Box must be blank when placement mode is unplaced")
+        if row.position:
+            row.errors.append("Position must be blank when placement mode is unplaced")
+    elif row.placement_mode == "next_empty":
+        if position_plan is None:
+            row.errors.append("A box is required when placement mode is next_empty")
+        if row.position:
+            row.errors.append("Position must be blank when placement mode is next_empty")
+    elif row.placement_mode == "grouped":
+        if position_plan is None:
+            row.errors.append("A box is required when placement mode is grouped")
+        if placement_group_value is None:
+            row.errors.append("Placement group is required when placement mode is grouped")
+        if row.position:
+            if position_plan is None:
+                row.errors.append("Position can only be used when a box is resolved")
+            else:
+                label = row.position.upper()
+                explicit_positions = explicit_positions_by_box.setdefault(position_plan.box_id, set())
+                if label not in position_plan.positions_by_label:
+                    row.errors.append("Position does not exist in the resolved box")
+                elif label in position_plan.occupied_labels:
+                    row.errors.append("Position is already occupied")
+                elif label in explicit_positions:
+                    row.errors.append("Position is duplicated in this import for the same box")
+                else:
+                    row.assigned_box_name = position_plan.box_name
+                    row.assigned_position = label
+                    explicit_positions.add(label)
+    elif row.placement_mode == "offset":
+        if placement_group_value is None:
+            row.errors.append("Placement group is required when placement mode is offset")
+        if row.position:
+            if position_plan is None:
+                row.errors.append("Position can only be used when a box is resolved")
+            else:
+                label = row.position.upper()
+                explicit_positions = explicit_positions_by_box.setdefault(position_plan.box_id, set())
+                if label not in position_plan.positions_by_label:
+                    row.errors.append("Position does not exist in the resolved box")
+                elif label in position_plan.occupied_labels:
+                    row.errors.append("Position is already occupied")
+                elif label in explicit_positions:
+                    row.errors.append("Position is duplicated in this import for the same box")
+                else:
+                    row.assigned_box_name = position_plan.box_name
+                    row.assigned_position = label
+                    explicit_positions.add(label)
+        elif placement_offset_value is None:
+            row.errors.append("Placement offset is required for non-anchor offset rows")
 
     row.valid = not row.errors
     row.status = "valid" if row.valid else "invalid"
+
+
+def _resolve_grouped_rows(
+    grouped_rows_by_group: dict[int, list[BulkSampleImportRow]],
+    box_plan_lookup: dict[int, PositionPlan],
+    explicit_positions_by_box: dict[int, set[str]],
+    default_target_box_id: int | None,
+) -> None:
+    for group_id, rows in grouped_rows_by_group.items():
+        anchor_rows = [row for row in rows if row.position]
+        if len(anchor_rows) != 1:
+            for row in rows:
+                row.errors.append("Grouped placement requires exactly one anchor row with a position")
+                row.valid = False
+                row.status = "invalid"
+            continue
+        anchor = anchor_rows[0]
+        anchor_plan = _resolve_plan_for_row(box_plan_lookup, anchor.box, default_target_box_id)
+        if anchor_plan is None:
+            for row in rows:
+                row.errors.append("Grouped placement anchor box could not be resolved")
+                row.valid = False
+                row.status = "invalid"
+            continue
+        anchor_label = anchor.position.upper()
+        seen_box_ids = {anchor_plan.box_id}
+        for row in rows:
+            if row is anchor or not row.valid:
+                continue
+            if row.position:
+                row.errors.append("Only the anchor row may include a position for grouped placement")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            position_plan = _resolve_plan_for_row(box_plan_lookup, row.box, default_target_box_id)
+            if position_plan is None:
+                row.errors.append("Grouped placement box could not be resolved")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            if position_plan.box_id in seen_box_ids:
+                row.errors.append(f"Placement group {group_id} cannot target the same box more than once")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            if anchor_label not in position_plan.positions_by_label:
+                row.errors.append(f"Position {anchor_label} does not exist in the grouped box")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            explicit_positions = explicit_positions_by_box.setdefault(position_plan.box_id, set())
+            if anchor_label in position_plan.occupied_labels:
+                row.errors.append(f"Position {anchor_label} is already occupied in the grouped box")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            if anchor_label in explicit_positions:
+                row.errors.append(f"Position {anchor_label} is duplicated in this import for the grouped box")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            row.assigned_box_name = position_plan.box_name
+            row.assigned_position = anchor_label
+            explicit_positions.add(anchor_label)
+            seen_box_ids.add(position_plan.box_id)
+
+
+def _resolve_offset_rows(
+    offset_rows_by_group: dict[int, list[BulkSampleImportRow]],
+    box_plan_lookup: dict[int, PositionPlan],
+    explicit_positions_by_box: dict[int, set[str]],
+    default_target_box_id: int | None,
+) -> None:
+    for group_id, rows in offset_rows_by_group.items():
+        anchor_rows = [row for row in rows if row.position]
+        if len(anchor_rows) != 1:
+            for row in rows:
+                row.errors.append("Offset placement requires exactly one anchor row with a position")
+                row.valid = False
+                row.status = "invalid"
+            continue
+        anchor = anchor_rows[0]
+        anchor_plan = _resolve_plan_for_row(box_plan_lookup, anchor.box, default_target_box_id)
+        if anchor_plan is None:
+            for row in rows:
+                row.errors.append("Offset placement anchor box could not be resolved")
+                row.valid = False
+                row.status = "invalid"
+            continue
+        anchor_offset = _parse_int(anchor.placement_offset)
+        if anchor_offset not in (None, 0):
+            for row in rows:
+                row.errors.append("Offset placement anchor row must leave placement_offset blank or set it to 0")
+                row.valid = False
+                row.status = "invalid"
+            continue
+        anchor_label = anchor.position.upper()
+        ordered_labels = _ordered_position_labels(anchor_plan)
+        if anchor_label not in ordered_labels:
+            for row in rows:
+                row.errors.append("Offset placement anchor position was not found")
+                row.valid = False
+                row.status = "invalid"
+            continue
+        anchor_index = ordered_labels.index(anchor_label)
+        for row in rows:
+            if row is anchor or not row.valid:
+                continue
+            if row.position:
+                row.errors.append("Only the anchor row may include a position for offset placement")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            position_plan = _resolve_plan_for_row(box_plan_lookup, row.box, default_target_box_id)
+            if row.box and position_plan is not None and position_plan.box_id != anchor_plan.box_id:
+                row.errors.append("Offset placement rows must use the same box as the anchor")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            offset_value = _parse_int(row.placement_offset)
+            if offset_value is None:
+                row.errors.append("Placement offset is required for non-anchor offset rows")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            target_index = anchor_index + offset_value
+            if target_index >= len(ordered_labels):
+                row.errors.append("Placement offset extends past the end of the anchor box")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            target_label = ordered_labels[target_index]
+            explicit_positions = explicit_positions_by_box.setdefault(anchor_plan.box_id, set())
+            if target_label in anchor_plan.occupied_labels:
+                row.errors.append(f"Position {target_label} is already occupied in the offset box")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            if target_label in explicit_positions:
+                row.errors.append(f"Position {target_label} is duplicated in this import for the offset box")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            row.assigned_box_name = anchor_plan.box_name
+            row.assigned_position = target_label
+            explicit_positions.add(target_label)
+
+
+def _resolve_next_empty_rows(
+    next_empty_rows_by_box: dict[int, list[BulkSampleImportRow]],
+    box_plan_lookup: dict[int, PositionPlan],
+    explicit_positions_by_box: dict[int, set[str]],
+) -> None:
+    for box_id, rows in next_empty_rows_by_box.items():
+        position_plan = box_plan_lookup.get(box_id)
+        if position_plan is None:
+            continue
+        available_labels = _available_labels(position_plan, explicit_positions_by_box.get(box_id, set()))
+        for row in rows:
+            if not available_labels:
+                row.errors.append("No open positions remain for next_empty placement")
+                row.valid = False
+                row.status = "invalid"
+                continue
+            label = available_labels.pop(0)
+            explicit_positions_by_box.setdefault(box_id, set()).add(label)
+            row.assigned_box_name = position_plan.box_name
+            row.assigned_position = label
+            row.status = "valid"
 
 
 def _build_box_plan_lookup(db: Session, target_box_id: int | None, global_errors: list[str]) -> dict[int, PositionPlan]:
@@ -830,6 +1114,37 @@ def _resolve_plan_for_row(
     if default_target_box_id is not None:
         return box_plan_lookup.get(default_target_box_id)
     return None
+
+
+def _available_labels(position_plan: PositionPlan, reserved_labels: set[str]) -> list[str]:
+    return [
+        label
+        for label in _ordered_position_labels(position_plan)
+        if label not in position_plan.occupied_labels and label not in reserved_labels
+    ]
+
+
+def _ordered_position_labels(position_plan: PositionPlan) -> list[str]:
+    return [
+        label
+        for label, _position in sorted(position_plan.positions_by_label.items(), key=lambda item: (item[1].row, item[1].col))
+    ]
+
+
+def _reserved_positions(
+    rows: list[BulkSampleImportRow],
+    box_plan_lookup: dict[int, PositionPlan],
+) -> dict[int, set[str]]:
+    reserved: dict[int, set[str]] = {}
+    box_lookup = {plan.box_name.lower(): plan for plan in box_plan_lookup.values()}
+    for row in rows:
+        if not row.valid or not row.assigned_box_name or not row.assigned_position:
+            continue
+        plan = box_lookup.get(row.assigned_box_name.lower())
+        if plan is None:
+            continue
+        reserved.setdefault(plan.box_id, set()).add(row.assigned_position)
+    return reserved
 
 
 def _finalize_preview_counts(preview: BulkSampleImportPreview) -> None:

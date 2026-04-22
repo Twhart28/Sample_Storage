@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 import re
 
 from sqlalchemy.orm import Session
@@ -623,12 +624,17 @@ def _normalize_units(value: str | None) -> str | None:
     return normalized or "mL"
 
 
-def _normalize_hemolysis(value: int | None) -> int | None:
+def _normalize_hemolysis(value: float | int | None) -> float | None:
     if value is None:
         return None
-    if value < 0 or value > 6:
-        raise SampleError("Hemolysis must be a whole number from 0 to 6")
-    return value
+    numeric = float(value)
+    if numeric < 1 or numeric > 7:
+        raise SampleError("Hemolysis must be between 1 and 7 in 0.5 increments")
+    doubled = numeric * 2
+    rounded = round(doubled)
+    if not math.isclose(doubled, rounded, abs_tol=1e-9):
+        raise SampleError("Hemolysis must be between 1 and 7 in 0.5 increments")
+    return rounded / 2
 
 
 def _sample_audit_snapshot(sample: models.Sample) -> dict[str, str]:

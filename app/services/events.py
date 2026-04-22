@@ -440,6 +440,8 @@ def _build_group_parent_view(children: list[EventView]) -> EventView:
     )
     action_label = str(source_payload.get("batch_action_label") or first.action_label)
     sample_count = int(source_payload.get("batch_sample_count") or len(children))
+    count_label = str(source_payload.get("batch_count_label") or "Samples").strip() or "Samples"
+    destination = _display_path(str(source_payload.get("batch_destination_path") or "").strip())
     returned_count = source_payload.get("batch_returned_count")
     out_for_analysis_count = source_payload.get("batch_out_for_analysis_count")
     if out_for_analysis_count is None:
@@ -468,21 +470,36 @@ def _build_group_parent_view(children: list[EventView]) -> EventView:
     group_summary = [
         EventContextItem(label="Workflow", value=workflow_type),
         EventContextItem(label="Recorded", value=recorded),
-        EventContextItem(label="Performed", value=performed),
-        EventContextItem(label="Operator", value=latest.username or "system"),
-        EventContextItem(label="Samples", value=str(sample_count)),
-        EventContextItem(label="Returned", value=str(returned_count)),
-        EventContextItem(label="Out for analysis", value=str(out_for_analysis_count)),
-        EventContextItem(label="Notes", value=notes),
     ]
-    context_parts = [workflow_type, f"{sample_count} samples"]
+    if performed != "--":
+        group_summary.append(EventContextItem(label="Performed", value=performed))
+    group_summary.extend(
+        [
+            EventContextItem(label="Operator", value=latest.username or "system"),
+            EventContextItem(label=count_label, value=str(sample_count)),
+        ]
+    )
+    if destination and destination != "--":
+        group_summary.append(EventContextItem(label="Destination", value=destination))
+    if has_disposition_counts:
+        group_summary.extend(
+            [
+                EventContextItem(label="Returned", value=str(returned_count)),
+                EventContextItem(label="Out for analysis", value=str(out_for_analysis_count)),
+            ]
+        )
+    if notes != "--":
+        group_summary.append(EventContextItem(label="Notes", value=notes))
+    context_parts = [workflow_type, f"{sample_count} {count_label.lower()}"]
+    if destination and destination != "--":
+        context_parts.append(destination)
     if has_disposition_counts:
         context_parts.append(f"{returned_count} returned")
         context_parts.append(f"{out_for_analysis_count} out")
     context_line = " | ".join(context_parts)
     pill_items = [
         EventContextItem(label="User", value=latest.username or "system"),
-        EventContextItem(label="Samples", value=str(sample_count)),
+        EventContextItem(label=count_label, value=str(sample_count)),
     ]
     if has_disposition_counts:
         pill_items.extend(

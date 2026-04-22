@@ -7,6 +7,7 @@ from app.db import get_db
 from app.schemas import (
     BoxCreateInput,
     BulkBoxImportCommitInput,
+    StorageNodeBatchMoveInput,
     StorageNodeCreate,
     StorageNodeMoveInput,
     StorageNodeUpdate,
@@ -38,7 +39,6 @@ async def create_storage_node(
     return {
         "id": node.id,
         "name": node.name,
-        "nickname": node.nickname,
         "notes": node.notes,
         "display_name": node.display_name,
         "node_type": node.node_type.value,
@@ -61,7 +61,6 @@ async def update_storage_node(
     return {
         "id": node.id,
         "name": node.name,
-        "nickname": node.nickname,
         "notes": node.notes,
         "display_name": node.display_name,
         "node_type": node.node_type.value,
@@ -82,6 +81,25 @@ async def move_storage_node(
     except storage_service.StorageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "node_id": node.id, "parent_id": node.parent_id}
+
+
+@router.post("/storage/nodes/move")
+async def move_storage_nodes(
+    payload: StorageNodeBatchMoveInput,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("manage_storage_tree")),
+):
+    try:
+        nodes = storage_service.move_storage_nodes(db, payload, current_user)
+    except storage_service.StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ok",
+        "moved_count": len(nodes),
+        "node_ids": [node.id for node in nodes],
+        "parent_id": payload.parent_id,
+    }
 
 
 @router.delete("/storage/node/{node_id}")

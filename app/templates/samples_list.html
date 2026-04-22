@@ -22,7 +22,9 @@
         <a class="button" href="/sample-actions" id="samples-analysis-start">Open actions workspace</a>
         <button type="button" class="ghost-button" id="samples-analysis-clear">Clear selection</button>
       </div>
-      <a class="ghost-button" href="/samples/bulk">Bulk Add</a>
+      {% if can_bulk_import_samples %}
+        <button type="button" class="ghost-button" id="samples-bulk-open">Bulk Add</button>
+      {% endif %}
       <a class="button" href="/samples/new">Add Sample</a>
     </div>
   </div>
@@ -49,6 +51,43 @@
 
   <script id="samples-table-bootstrap" type="application/json">{{ bootstrap | tojson }}</script>
 </section>
+
+{% if can_bulk_import_samples %}
+  <dialog id="samples-bulk-dialog" class="storage-dialog samples-bulk-dialog">
+    <div class="storage-dialog-form samples-bulk-dialog-form">
+      <div class="samples-bulk-head">
+        <div>
+          <h2>Bulk Add Samples</h2>
+          <p class="muted">Download the Excel template, complete it offline, then upload it here for preview and commit.</p>
+        </div>
+        <button type="button" class="ghost-button" id="samples-bulk-close">Close</button>
+      </div>
+
+      <div class="samples-bulk-actions">
+        <a class="ghost-button" href="/samples/bulk/template">Download Excel Template</a>
+        <label class="samples-bulk-upload-field">
+          <span>Upload completed template</span>
+          <input
+            type="file"
+            id="samples-bulk-file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          />
+        </label>
+      </div>
+
+      <p class="muted">Bulk add uses the Excel workflow only. Text paste and manual row entry are no longer part of this tool.</p>
+
+      <p class="form-error hidden" id="samples-bulk-error"></p>
+      <div class="samples-bulk-status hidden" id="samples-bulk-status"></div>
+      <div class="samples-bulk-preview hidden" id="samples-bulk-preview" hidden></div>
+
+      <div class="actions-row samples-bulk-footer">
+        <button type="button" class="ghost-button hidden" id="samples-bulk-reset" hidden>Start Over</button>
+        <button type="button" class="hidden" id="samples-bulk-commit" hidden disabled>Import Valid Rows</button>
+      </div>
+    </div>
+  </dialog>
+{% endif %}
 
 <noscript>
   <section class="card compact">

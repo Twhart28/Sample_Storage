@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -58,6 +58,23 @@ async def create_sample(payload: SampleCreateInput, request: Request, db: Sessio
 async def bulk_preview(payload: BulkSampleImportCommitInput, request: Request, db: Session = Depends(get_db)):
     _ = require_permission("bulk_import_samples")(request, db)
     return bulk_import_service.preview_sample_import(db, payload.raw_payload, payload.target_box_id)
+
+
+@router.post("/bulk/preview-upload")
+async def bulk_preview_upload(
+    request: Request,
+    import_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    _ = require_permission("bulk_import_samples")(request, db)
+    file_bytes = await import_file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Upload a completed Excel template.")
+    filename = str(import_file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Bulk add only accepts .xlsx workbooks.")
+    raw_payload = bulk_import_service.sample_workbook_to_csv(file_bytes)
+    return bulk_import_service.preview_sample_import(db, raw_payload, None)
 
 
 @router.post("/bulk/commit")
@@ -261,9 +278,9 @@ def _build_search_query(request: Request) -> SampleSearchQuery:
         aliquot_number=_parse_int(params.get("aliquot_number")),
         aliquot_min=_parse_int(params.get("aliquot_min")),
         aliquot_max=_parse_int(params.get("aliquot_max")),
-        hemolysis_classification=_parse_int(params.get("hemolysis_classification")),
-        hemolysis_min=_parse_int(params.get("hemolysis_min")),
-        hemolysis_max=_parse_int(params.get("hemolysis_max")),
+        hemolysis_classification=_parse_float(params.get("hemolysis_classification")),
+        hemolysis_min=_parse_float(params.get("hemolysis_min")),
+        hemolysis_max=_parse_float(params.get("hemolysis_max")),
         thaw_count_min=_parse_int(params.get("thaw_count_min")),
         thaw_count_max=_parse_int(params.get("thaw_count_max")),
         volume_min=_parse_float(params.get("volume_min")),

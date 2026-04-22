@@ -9,6 +9,7 @@
   const sampleSelect = document.getElementById("place-sample-id");
   const positionIdField = document.getElementById("place-position-id");
   const positionLabel = document.getElementById("place-position-label");
+  const copyBoxPositionButton = document.getElementById("copy-box-position-button");
   const zoomInput = controls?.querySelector("[data-box-zoom]");
   const zoomValue = controls?.querySelector("[data-box-zoom-value]");
 
@@ -40,6 +41,7 @@
     if (openButton && placeDialog) {
       positionIdField.value = openButton.dataset.positionId || "";
       positionLabel.textContent = `Open position ${openButton.dataset.positionLabel || ""}`;
+      positionLabel.dataset.positionLabel = openButton.dataset.positionLabel || "";
       resetPlacementFilter();
       placeDialog.showModal();
       return;
@@ -51,6 +53,7 @@
   });
 
   sampleSearch?.addEventListener("input", filterSamples);
+  copyBoxPositionButton?.addEventListener("click", copyBoxAndPosition);
 
   placeForm?.addEventListener("submit", () => {
     placeDialog?.close();
@@ -81,6 +84,41 @@
     });
     if (sampleSelect.options.length > 0) {
       sampleSelect.value = sampleSelect.options[0].value;
+    }
+  }
+
+  async function copyBoxAndPosition() {
+    if (!placeDialog || !copyBoxPositionButton) return;
+    const boxName = placeDialog.dataset.boxName || "";
+    const position = positionLabel?.dataset.positionLabel || "";
+    if (!boxName || !position) {
+      return;
+    }
+    const originalLabel = copyBoxPositionButton.textContent;
+    const payload = `${boxName}\t${position}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(payload);
+      } else {
+        const helper = document.createElement("textarea");
+        helper.value = payload;
+        helper.setAttribute("readonly", "true");
+        helper.style.position = "absolute";
+        helper.style.left = "-9999px";
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand("copy");
+        document.body.removeChild(helper);
+      }
+      copyBoxPositionButton.textContent = "Copied";
+      window.setTimeout(() => {
+        copyBoxPositionButton.textContent = originalLabel;
+      }, 1200);
+    } catch (_error) {
+      copyBoxPositionButton.textContent = "Copy failed";
+      window.setTimeout(() => {
+        copyBoxPositionButton.textContent = originalLabel;
+      }, 1500);
     }
   }
 

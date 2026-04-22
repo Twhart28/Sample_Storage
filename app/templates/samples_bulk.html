@@ -4,12 +4,11 @@
   <div class="section-head bulk-head">
     <div>
       <h1>Bulk Add Samples</h1>
-      <p class="muted">Paste spreadsheet rows or upload a CSV, preview the validation, then import the valid rows.</p>
+      <p class="muted">Use the Excel template, or paste/upload sample rows for preview before import.</p>
     </div>
     <div class="page-actions">
       <a class="ghost-button" href="/samples">Back to Samples</a>
       <a class="ghost-button" href="/samples/bulk/template">Download Excel Template</a>
-      <a class="ghost-button" href="/samples/bulk/template.csv">Download CSV Template</a>
     </div>
   </div>
   <p class="muted">Expected columns: <code>{{ template_headers | join(', ') }}</code></p>
@@ -22,7 +21,7 @@
         <input type="file" name="csv_file" accept=".csv,.txt,.tsv,.xlsx" />
       </label>
     </div>
-    <p class="muted">The Excel template includes header comments. Use the <code>box</code> column to place samples into specific boxes. Leave it blank to create samples unplaced.</p>
+    <p class="muted">The Excel template includes header comments and a Placement Help sheet. Every row must choose a <code>placement_mode</code>: <code>specific</code>, <code>next_empty</code>, <code>unplaced</code>, <code>grouped</code>, or <code>offset</code>.</p>
     <div class="actions-row">
       <button type="submit">Preview Import</button>
     </div>
@@ -62,6 +61,7 @@
               <th>Hemolysis</th>
               <th>Study Role</th>
               <th>Volume</th>
+              <th>Placement</th>
               <th>Box</th>
               <th>Position</th>
               <th>Status</th>
@@ -80,6 +80,7 @@
                 <td>{{ row.hemolysis or '--' }}</td>
                 <td>{{ row.study_role or 'current' }}</td>
                 <td>{% if row.volume %}{{ row.volume }} {{ row.volume_units or 'mL' }}{% else %}--{% endif %}</td>
+                <td>{{ row.placement_mode or '--' }}{% if row.placement_group %} #{{ row.placement_group }}{% endif %}{% if row.placement_offset %} +{{ row.placement_offset }}{% endif %}</td>
                 <td>{{ row.assigned_box_name or row.box or '--' }}</td>
                 <td>{{ row.assigned_position or row.position or '--' }}</td>
                 <td><span class="status-pill">{{ row.status }}</span></td>
@@ -114,6 +115,7 @@
               <th>Row</th>
               <th>ID</th>
               <th>Status</th>
+              <th>Placement</th>
               <th>Box</th>
               <th>Position</th>
               <th>Errors</th>
@@ -125,6 +127,7 @@
                 <td>{{ row.row_number }}</td>
                 <td>{{ row.sample_id or '--' }}</td>
                 <td><span class="status-pill">{{ row.status }}</span></td>
+                <td>{{ row.placement_mode or '--' }}{% if row.placement_group %} #{{ row.placement_group }}{% endif %}{% if row.placement_offset %} +{{ row.placement_offset }}{% endif %}</td>
                 <td>{{ row.assigned_box_name or row.box or '--' }}</td>
                 <td>{{ row.assigned_position or row.position or '--' }}</td>
                 <td>{{ row.errors | join('; ') or '--' }}</td>

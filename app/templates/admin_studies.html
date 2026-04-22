@@ -44,6 +44,7 @@
           <small class="muted">{{ usage_counts.get(study.id, 0) }} linked samples</small>
         </div>
         <div class="admin-config-actions">
+          <a class="ghost-button" href="/settings/studies/{{ study.id }}/workflow">Workflow</a>
           <details class="admin-edit-card">
             <summary class="icon-button admin-edit-toggle" title="Edit study">&#9998;</summary>
             <form method="post" action="/admin/studies/{{ study.id }}" class="form-grid compact-form admin-edit-form">
