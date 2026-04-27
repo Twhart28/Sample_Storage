@@ -373,7 +373,7 @@ class RouteWorkflowTests(unittest.TestCase):
 
         workspace = self.client.get("/visit-workflows")
         self.assertEqual(workspace.status_code, 200)
-        self.assertContains(workspace, "Visit Execution")
+        self.assertContains(workspace, "Visit Workflows")
         self.assertContains(workspace, "Visit Study")
 
     def test_visit_workflow_start_preview_commit_and_summary(self):

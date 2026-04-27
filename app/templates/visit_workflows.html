@@ -1,13 +1,15 @@
 {% extends "base.html" %}
 
 {% macro session_list(title, sessions, empty_text) %}
+  {% set visible_sessions = sessions[:5] %}
+  {% set extra_sessions = sessions[5:] %}
   <article class="card visit-session-list-card">
     <div class="section-head">
       <h2>{{ title }}</h2>
-      <span class="muted">{{ sessions | length }} shown</span>
+      <span class="muted">{{ visible_sessions | length }}{% if extra_sessions %} of {{ sessions | length }}{% endif %} shown</span>
     </div>
     <div class="stack-list visit-session-list">
-      {% for session in sessions %}
+      {% for session in visible_sessions %}
         <a class="stack-row visit-session-row" href="/visit-workflows/{{ session.id }}">
           <span>
             <strong>{{ session.study_name }} / {{ session.participant_id }}</strong>
@@ -22,15 +24,34 @@
         <p class="muted">{{ empty_text }}</p>
       {% endfor %}
     </div>
+    {% if extra_sessions %}
+      <details class="visit-session-more">
+        <summary>View {{ extra_sessions | length }} more</summary>
+        <div class="stack-list visit-session-list visit-session-list--more">
+          {% for session in extra_sessions %}
+            <a class="stack-row visit-session-row" href="/visit-workflows/{{ session.id }}">
+              <span>
+                <strong>{{ session.study_name }} / {{ session.participant_id }}</strong>
+                <small>{{ session.workflow_label }}</small>
+              </span>
+              <span>
+                <em>{{ session.status.replace('_', ' ').title() }}</em>
+                <small>{{ format_datetime(session.completed_at or session.updated_at) }}</small>
+              </span>
+            </a>
+          {% endfor %}
+        </div>
+      </details>
+    {% endif %}
   </article>
 {% endmacro %}
 
 {% block content %}
-<section class="page-head card compact">
+<section class="page-head card compact visit-workflows-head">
   <div>
     <p class="eyebrow">Study Workflows</p>
-    <h1>Visit Execution</h1>
-    <p class="muted">Start a visit session, upload the completed workbook, and review recent workflow activity.</p>
+    <h1>Visit Workflows</h1>
+    <p class="muted">Start study visit sessions, upload completed workbooks, and review recent workflow activity.</p>
   </div>
   <div class="page-actions">
     <a class="ghost-button" href="/dashboard">Back to Home</a>
@@ -44,10 +65,9 @@
 <section class="card visit-start-card">
   <div class="section-head">
     <div>
-      <h2>Start Workflow</h2>
+      <h2>Start Visit</h2>
       <p class="muted">Choose a configured study workflow, enter participant details, and start the visit workspace.</p>
     </div>
-    <span class="status-pill">{{ workflows | length }} active</span>
   </div>
   <form method="post" action="/visit-workflows" class="form-grid compact-form visit-start-form">
     <label>Study

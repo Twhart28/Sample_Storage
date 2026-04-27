@@ -373,6 +373,11 @@ button,
   gap: 16px;
 }
 
+.visit-workflows-head h1 {
+  font-size: clamp(2.1rem, 4vw, 3.1rem);
+  line-height: 1;
+}
+
 .visit-start-form {
   align-items: end;
 }
@@ -395,6 +400,23 @@ button,
 
 .visit-session-row small {
   color: var(--muted);
+}
+
+.visit-session-more {
+  margin-top: 10px;
+  border-top: 1px solid rgba(29, 31, 29, 0.08);
+}
+
+.visit-session-more summary {
+  display: inline-flex;
+  margin-top: 10px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.visit-session-list--more {
+  margin-top: 8px;
 }
 
 .visit-detail-card {
