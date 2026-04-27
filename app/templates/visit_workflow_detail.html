@@ -3,11 +3,10 @@
 <section class="page-head card compact">
   <div>
     <p class="eyebrow">Visit Session</p>
-    <h1>{{ session.study_name }} / {{ session.participant_id }}</h1>
-    <p class="muted">{{ session.workflow_label }} / {{ format_datetime(session.visit_date) }}</p>
+    <h1>{{ session.participant_id }}</h1>
+    <p class="muted">{{ session.study_name }} / {{ session.workflow_label }} / {{ format_datetime(session.visit_date) }}</p>
   </div>
   <div class="page-actions">
-    <span class="status-pill">{{ session.status.replace('_', ' ').title() }}</span>
     <a class="ghost-button" href="/visit-workflows">Back to Workflows</a>
     {% if session.imported_rows > 0 or session.status == 'completed' %}
       <a class="button" href="/visit-workflows/{{ session.id }}/summary">Printable summary</a>
@@ -19,125 +18,131 @@
   <p class="form-error">{{ error_message }}</p>
 {% endif %}
 
-<section class="visit-detail-grid">
-  <article class="card visit-detail-card">
-    <h2>Visit Details</h2>
-    <dl class="detail-grid">
-      <div><dt>Study</dt><dd>{{ session.study_name }}</dd></div>
-      <div><dt>Workflow</dt><dd>{{ session.workflow_label }}</dd></div>
-      <div><dt>Participant ID</dt><dd>{{ session.participant_id }}</dd></div>
-      <div><dt>Visit Date</dt><dd>{{ format_datetime(session.visit_date) }}</dd></div>
-      <div><dt>Operator</dt><dd>{{ session.operator_name or '--' }}</dd></div>
-      <div><dt>Uploaded workbook</dt><dd>{{ session.uploaded_workbook_filename or '--' }}</dd></div>
-    </dl>
-    {% if session.workflow_description %}
-      <p class="muted">{{ session.workflow_description }}</p>
-    {% endif %}
-  </article>
-
-  <article class="card visit-progress-card">
-    <h2>Workflow Progress</h2>
-    <div class="visit-step-list">
-      <span class="visit-step {% if session.step_status.template_downloaded_at %}is-complete{% endif %}">Template downloaded</span>
-      <span class="visit-step {% if session.step_status.workbook_uploaded_at %}is-complete{% endif %}">Workbook uploaded</span>
-      <span class="visit-step {% if session.step_status.sample_import_committed_at or session.status == 'completed' %}is-complete{% endif %}">Sample import committed</span>
-      <span class="visit-step {% if session.step_status.summary_reviewed_at %}is-complete{% endif %}">Summary reviewed</span>
-    </div>
-  </article>
-
-  <article class="card visit-quick-links-card">
-    <h2>Quick Links</h2>
-    <div class="stack-list">
-      {% for link in session.quick_links %}
-        <a class="stack-row" href="/visit-workflows/{{ session.id }}/open-link/{{ link.key }}" target="_blank" rel="noopener noreferrer">
-          <span><strong>{{ link.label }}</strong></span>
-        </a>
-      {% else %}
-        <p class="muted">No quick links configured for this study workflow.</p>
-      {% endfor %}
-    </div>
-  </article>
-</section>
-
-<section class="visit-detail-grid visit-work-grid">
-  <article class="card visit-notes-card">
-    <h2>Visit Notes</h2>
-    <form method="post" action="/visit-workflows/{{ session.id }}/notes" class="stack-form compact-form">
-      <label>Notes
-        <textarea name="notes" placeholder="Record visit notes, issues, or deviations in one place.">{{ session.session_notes or '' }}</textarea>
-      </label>
-      <button type="submit">Save notes</button>
-    </form>
-  </article>
-
-  <article class="card visit-upload-card">
-    <div class="section-head">
-      <div>
-        <h2>Workbook</h2>
-        <p class="muted">Download the study template, complete it offline, then upload it here for preview.</p>
-      </div>
-      <a class="button" href="/visit-workflows/{{ session.id }}/template">Download visit template</a>
-    </div>
-    <form method="post" action="/visit-workflows/{{ session.id }}/preview" enctype="multipart/form-data" class="stack-form compact-form">
-      <label>Completed visit workbook
-        <input type="file" name="visit_file" accept=".xlsx" required />
-      </label>
-      <button type="submit">Preview workbook</button>
-    </form>
-
-    {% if preview %}
-      <div class="section-head">
-        <h3>Preview</h3>
-        <span class="muted">{{ preview.sample_preview.valid_rows }} valid / {{ preview.sample_preview.total_rows }} total</span>
-      </div>
-      {% if preview.sample_preview.global_errors %}
-        <p class="form-error">{{ preview.sample_preview.global_errors | join(', ') }}</p>
+<section class="visit-session-layout">
+  <div class="visit-main-column">
+    <article class="card visit-detail-card">
+      <h2>Visit Details</h2>
+      <dl class="detail-grid">
+        <div><dt>Study</dt><dd>{{ session.study_name }}</dd></div>
+        <div><dt>Workflow</dt><dd>{{ session.workflow_label }}</dd></div>
+        <div><dt>Participant ID</dt><dd>{{ session.participant_id }}</dd></div>
+        <div><dt>Visit Date</dt><dd>{{ format_datetime(session.visit_date) }}</dd></div>
+        <div><dt>Operator</dt><dd>{{ session.operator_name or '--' }}</dd></div>
+        <div><dt>Uploaded workbook</dt><dd>{{ session.uploaded_workbook_filename or '--' }}</dd></div>
+      </dl>
+      {% if session.workflow_description %}
+        <p class="muted">{{ session.workflow_description }}</p>
       {% endif %}
-      <div class="sample-table-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Row</th>
-              <th>Sample ID</th>
-              <th>Type</th>
-              <th>Position</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in preview.sample_preview.rows %}
-              <tr>
-                <td>{{ row.row_number }}</td>
-                <td>{{ row.sample_id or '--' }}</td>
-                <td>{{ row.sample_type or '--' }}</td>
-                <td>{{ row.assigned_box_name or row.box or '--' }} {{ row.assigned_position or row.position or '' }}</td>
-                <td>
-                  {% if row.errors %}
-                    {{ row.errors | join('; ') }}
-                  {% else %}
-                    {{ row.status }}
-                  {% endif %}
-                </td>
-              </tr>
-            {% else %}
-              <tr><td colspan="5">No sample rows found in this workbook.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <form method="post" action="/visit-workflows/{{ session.id }}/commit" class="actions-row">
-        <input type="hidden" name="raw_payload" value="{{ raw_payload }}" />
-        <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or preview.uploaded_filename or '' }}" />
-        <button type="submit">Commit sample import</button>
-      </form>
-    {% endif %}
+    </article>
 
-    {% if result %}
-      <div class="notes-block">
-        <strong>Commit Result</strong>
-        <p>{{ result.imported_rows }} sample rows imported.</p>
+    <article class="card visit-upload-card">
+      <div class="section-head">
+        <div>
+          <h2>Workbook</h2>
+          <p class="muted">Download the study template, complete it offline, then upload it here for preview.</p>
+        </div>
+        <a class="button" href="/visit-workflows/{{ session.id }}/template">Download visit template</a>
       </div>
-    {% endif %}
-  </article>
+      <form method="post" action="/visit-workflows/{{ session.id }}/preview" enctype="multipart/form-data" class="stack-form compact-form">
+        <label>Completed visit workbook
+          <input type="file" name="visit_file" accept=".xlsx" required />
+        </label>
+        <button type="submit">Preview workbook</button>
+      </form>
+
+      {% if preview %}
+        <div class="section-head">
+          <h3>Preview</h3>
+          <span class="muted">{{ preview.sample_preview.valid_rows }} valid / {{ preview.sample_preview.total_rows }} total</span>
+        </div>
+        {% if preview.sample_preview.global_errors %}
+          <p class="form-error">{{ preview.sample_preview.global_errors | join(', ') }}</p>
+        {% endif %}
+        <div class="sample-table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Row</th>
+                <th>Sample ID</th>
+                <th>Type</th>
+                <th>Position</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in preview.sample_preview.rows %}
+                <tr>
+                  <td>{{ row.row_number }}</td>
+                  <td>{{ row.sample_id or '--' }}</td>
+                  <td>{{ row.sample_type or '--' }}</td>
+                  <td>{{ row.assigned_box_name or row.box or '--' }} {{ row.assigned_position or row.position or '' }}</td>
+                  <td>
+                    {% if row.errors %}
+                      {{ row.errors | join('; ') }}
+                    {% else %}
+                      {{ row.status }}
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="5">No sample rows found in this workbook.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <form method="post" action="/visit-workflows/{{ session.id }}/commit" class="actions-row">
+          <input type="hidden" name="raw_payload" value="{{ raw_payload }}" />
+          <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or preview.uploaded_filename or '' }}" />
+          <button type="submit">Commit sample import</button>
+        </form>
+      {% endif %}
+
+      {% if result %}
+        <div class="notes-block">
+          <strong>Commit Result</strong>
+          <p>{{ result.imported_rows }} sample rows imported.</p>
+        </div>
+      {% endif %}
+    </article>
+
+    <article class="card visit-notes-card">
+      <h2>Visit Notes</h2>
+      <form method="post" action="/visit-workflows/{{ session.id }}/notes" class="stack-form compact-form">
+        <label>Notes
+          <textarea name="notes" placeholder="Record visit notes, issues, or deviations in one place.">{{ session.session_notes or '' }}</textarea>
+        </label>
+        <button type="submit">Save notes</button>
+      </form>
+    </article>
+  </div>
+
+  <aside class="visit-side-column">
+    <article class="card visit-progress-card">
+      <div class="section-head">
+        <h2>Workflow Progress</h2>
+        <span class="status-pill">{{ session.status.replace('_', ' ').title() }}</span>
+      </div>
+      <div class="visit-step-list">
+        <span class="visit-step {% if session.step_status.template_downloaded_at %}is-complete{% endif %}">Template downloaded</span>
+        <span class="visit-step {% if session.step_status.workbook_uploaded_at %}is-complete{% endif %}">Workbook uploaded</span>
+        <span class="visit-step {% if session.step_status.sample_import_committed_at or session.status == 'completed' %}is-complete{% endif %}">Sample import committed</span>
+        <span class="visit-step {% if session.step_status.summary_reviewed_at %}is-complete{% endif %}">Summary reviewed</span>
+      </div>
+    </article>
+
+    <article class="card visit-quick-links-card">
+      <h2>Quick Links</h2>
+      <p class="muted">Open study-specific working files in a new browser tab.</p>
+      <div class="stack-list visit-quick-link-list">
+        {% for link in session.quick_links %}
+          <a class="stack-row" href="/visit-workflows/{{ session.id }}/open-link/{{ link.key }}" target="_blank" rel="noopener noreferrer">
+            <span><strong>{{ link.label }}</strong></span>
+          </a>
+        {% else %}
+          <p class="muted">No quick links configured for this study workflow.</p>
+        {% endfor %}
+      </div>
+    </article>
+  </aside>
 </section>
 {% endblock %}
