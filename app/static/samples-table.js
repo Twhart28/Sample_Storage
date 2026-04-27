@@ -1347,7 +1347,7 @@
       return `${escapeHtml(String(row.volume))} ${escapeHtml(row.volume_units || "")}`.trim();
     }
     if (key === "location") {
-      return escapeHtml(row.location_path || "Unplaced");
+      return renderLocationCell(row);
     }
     if (key === "visit_label") {
       return escapeHtml(row.visit_label || "--");
@@ -1374,6 +1374,21 @@
       return formatDateTime(row.updated_at);
     }
     return "--";
+  }
+
+  function renderLocationCell(row) {
+    if (!row.location_path) {
+      return '<span class="sample-location-display">Unplaced</span>';
+    }
+    const fullPath = String(row.location_path);
+    const pathParts = fullPath
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const compactPath = pathParts.length > 2
+      ? `... / ${pathParts.slice(-2).join(" / ")}`
+      : pathParts.join(" / ");
+    return `<span class="sample-location-display" title="${escapeHtml(fullPath)}">${escapeHtml(compactPath || fullPath)}</span>`;
   }
 
   function renderOptionInputs(columnKey, options) {

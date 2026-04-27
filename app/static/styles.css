@@ -1321,6 +1321,14 @@ button,
   line-height: 1.35;
 }
 
+.sample-location-display {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sample-table .sample-col--sample_id,
 .sample-table .sample-col--study,
 .sample-table .sample-col--sample_type,
