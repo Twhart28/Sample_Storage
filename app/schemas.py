@@ -620,11 +620,17 @@ class StorageNodeCreate(BaseModel):
     notes: str | None = None
     node_type: Literal["freezer", "shelf", "rack", "box"]
     parent_id: int | None = None
+    rack_rows: int | None = None
+    rack_cols: int | None = None
+    rack_slot: str | None = None
 
 
 class StorageNodeUpdate(BaseModel):
     name: str
     notes: str | None = None
+    rack_rows: int | None = None
+    rack_cols: int | None = None
+    rack_slot: str | None = None
 
 
 class StorageNodeMoveInput(BaseModel):
@@ -653,6 +659,13 @@ class StorageNodeView(OrmModel):
     can_accept_children: bool
     filled_positions: int = 0
     total_positions: int = 0
+    rack_layout_rows: int | None = None
+    rack_layout_cols: int | None = None
+    rack_layout_label: str | None = None
+    rack_slot_row: int | None = None
+    rack_slot_col: int | None = None
+    rack_slot_col_label: str | None = None
+    rack_slot_label: str | None = None
     child_types: list[str] = Field(default_factory=list)
     children: list["StorageNodeView"] = Field(default_factory=list)
 
@@ -677,6 +690,10 @@ class StorageLookupView(OrmModel):
     box_id: int
     box_name: str
     box_path: str
+    rack_slot_row: int | None = None
+    rack_slot_col: int | None = None
+    rack_slot_col_label: str | None = None
+    rack_slot_label: str | None = None
     positions: list[StoragePositionView] = Field(default_factory=list)
 
 
@@ -736,6 +753,7 @@ class BulkBoxImportRow(BaseModel):
     row_number: int
     parent: str | None = None
     box: str | None = None
+    rack_slot: str | None = None
     rows: str | None = None
     cols: str | None = None
     notes: str | None = None

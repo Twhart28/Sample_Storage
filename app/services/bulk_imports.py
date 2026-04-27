@@ -57,6 +57,7 @@ SAMPLE_HEADERS = [
 BOX_HEADERS = [
     "parent",
     "box",
+    "rack_slot",
     "rows",
     "cols",
     "notes",
@@ -114,14 +115,16 @@ SAMPLE_HEADER_COMMENTS = {
 BOX_TEMPLATE_WIDTHS = {
     "A": 32.0,
     "B": 18.0,
-    "C": 8.0,
+    "C": 12.0,
     "D": 8.0,
-    "E": 28.0,
+    "E": 8.0,
+    "F": 28.0,
 }
-BOX_CENTERED_ENTRY_COLUMNS = ["A", "B", "C", "D"]
+BOX_CENTERED_ENTRY_COLUMNS = ["A", "B", "C", "D", "E"]
 BOX_HEADER_COMMENTS = {
     "parent": "Required.\nChoose an existing shelf or rack path from the dropdown.\nExamples: Freezer A > Shelf 1 or Freezer A > Shelf 1 > Rack 2",
     "box": "Required.\nThe new unique box name to create.",
+    "rack_slot": "Optional.\nUse a label like A2 or C4 when the parent is a rack with a configured layout.\nLeave blank if the box should not use a rack position.",
     "rows": "Required.\nNumber of box rows. Whole numbers only and must be greater than zero.",
     "cols": "Required.\nNumber of box columns. Whole numbers only and must be greater than zero.",
     "notes": "Optional.\nFree text notes to store on the box.",
@@ -317,10 +320,6 @@ def sample_workbook_to_csv(file_bytes: bytes) -> str:
     return workbook_to_csv(file_bytes)
 
 
-def box_template_csv() -> str:
-    return ",".join(BOX_HEADERS) + "\n"
-
-
 def box_template_xlsx(
     parent_paths: list[str] | None = None,
 ) -> bytes:
@@ -347,7 +346,7 @@ def box_template_xlsx(
     for row_index in range(2, BOX_ENTRY_ROWS + 1):
         for column_letter in BOX_CENTERED_ENTRY_COLUMNS:
             sheet[f"{column_letter}{row_index}"].alignment = centered_entry_alignment
-        for column_letter in ("E",):
+        for column_letter in ("F",):
             sheet[f"{column_letter}{row_index}"].alignment = notes_entry_alignment
 
     lookup_sheet = workbook.create_sheet("_lists")
@@ -542,6 +541,7 @@ def preview_box_import(db: Session, raw_payload: str) -> BulkBoxImportPreview:
             row_number=index + 2,
             parent=row.get("parent"),
             box=row.get("box"),
+            rack_slot=row.get("rack_slot"),
             rows=row.get("rows"),
             cols=row.get("cols"),
             notes=row.get("notes"),
@@ -556,6 +556,7 @@ def preview_box_import(db: Session, raw_payload: str) -> BulkBoxImportPreview:
 
     box_duplicates = _duplicate_keys(table.rows, "box")
     box_name_conflicts = _existing_box_names(all_nodes)
+    rack_slot_duplicates = _duplicate_box_slot_keys(table.rows)
 
     for row in preview.rows:
         _validate_box_row(
@@ -563,6 +564,7 @@ def preview_box_import(db: Session, raw_payload: str) -> BulkBoxImportPreview:
             parent_lookup=parent_lookup,
             box_duplicates=box_duplicates,
             existing_box_names=box_name_conflicts,
+            rack_slot_duplicates=rack_slot_duplicates,
         )
     _finalize_box_counts(preview)
     return preview
@@ -599,6 +601,7 @@ def commit_box_import(
                     notes=row.notes,
                     node_type="box",
                     parent_id=parent.id,
+                    rack_slot=row.rack_slot,
                 ),
                 user,
                 commit=False,
@@ -1019,8 +1022,10 @@ def _validate_box_row(
     parent_lookup: dict[str, models.StorageNode],
     box_duplicates: set[str],
     existing_box_names: set[str],
+    rack_slot_duplicates: set[tuple[str, str]],
 ) -> None:
     row.parent = _clean_value(row.parent)
+    row.rack_slot = _clean_value(row.rack_slot)
     parent = row.parent or ""
     box = (row.box or "").strip()
     if not parent:
@@ -1039,6 +1044,31 @@ def _validate_box_row(
         row.errors.append("Box name is duplicated in this import")
     if box and box in existing_box_names:
         row.errors.append("Box name already exists")
+    parent_node = parent_lookup.get(parent)
+    if row.rack_slot:
+        if parent_node is None:
+            pass
+        elif parent_node.node_type != models.StorageNodeType.rack:
+            row.errors.append("Rack position can only be used when the parent is a rack")
+        elif parent_node.rack_rows is None or parent_node.rack_cols is None:
+            row.errors.append("Parent rack does not have a rack layout configured")
+        else:
+            normalized_rack_slot = _normalize_rack_slot(row.rack_slot)
+            slot_row, slot_col = storage_service._parse_rack_slot_label(normalized_rack_slot)
+            if slot_row is None or slot_col is None:
+                row.errors.append("Rack position must use a label like A2 or C4")
+            else:
+                row.rack_slot = normalized_rack_slot
+                if slot_row > parent_node.rack_rows or slot_col > parent_node.rack_cols:
+                    row.errors.append(f"Rack position must fit inside the parent rack layout ({parent_node.rack_layout_label})")
+                if (parent.lower(), row.rack_slot.upper()) in rack_slot_duplicates:
+                    row.errors.append("Rack position is duplicated in this import for the same parent rack")
+                if any(
+                    child.rack_slot_label == row.rack_slot.upper()
+                    for child in parent_node.children
+                    if child.node_type == models.StorageNodeType.box
+                ):
+                    row.errors.append("Rack position is already assigned in the parent rack")
 
     row.valid = not row.errors
     row.status = "valid" if row.valid else "invalid"
@@ -1098,6 +1128,28 @@ def _study_lookup_map(studies: list[models.Study]) -> dict[str, models.Study]:
     for study in studies:
         lookup[study.name.lower()] = study
     return lookup
+
+
+def _duplicate_box_slot_keys(rows: list[dict[str, str | None]]) -> set[tuple[str, str]]:
+    counts: dict[tuple[str, str], int] = {}
+    for row in rows:
+        parent = _clean_value(row.get("parent"))
+        rack_slot = _normalize_rack_slot(row.get("rack_slot"))
+        if not parent or not rack_slot:
+            continue
+        key = (parent.lower(), rack_slot.upper())
+        counts[key] = counts.get(key, 0) + 1
+    return {key for key, count in counts.items() if count > 1}
+
+
+def _normalize_rack_slot(value: str | None) -> str | None:
+    normalized = _clean_value(value)
+    if not normalized:
+        return None
+    row, col = storage_service._parse_rack_slot_label(normalized)
+    if row is None or col is None:
+        return normalized.upper()
+    return models._rack_slot_label(row, col)
 
 
 def _resolve_plan_for_row(

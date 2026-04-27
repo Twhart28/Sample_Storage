@@ -112,13 +112,47 @@
     }
     const bootstrap = parseJsonNode(bootstrapNode, {});
     const storageKey = bootstrap.storage_key || DEFAULT_STORAGE_KEY;
+    const previewUrl = bootstrap.preview_url || "/api/samples/selection-preview";
     const summary = document.getElementById("sample-actions-selection-summary");
     const clearButton = document.getElementById("sample-actions-clear-selection");
+    const preview = document.getElementById("sample-actions-preview");
+    const previewEmpty = document.getElementById("sample-actions-preview-empty");
+    const previewSummary = document.getElementById("sample-actions-preview-summary");
+    const previewBody = document.getElementById("sample-actions-preview-body");
+    let previewRequestId = 0;
 
     const seededIds = Array.isArray(bootstrap.sample_ids) ? bootstrap.sample_ids : [];
     if (seededIds.length) {
       SampleActionSelection.add(seededIds, storageKey);
     }
+
+    document.querySelectorAll("[data-sample-action-open]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selectedIds = SampleActionSelection.load(storageKey);
+        if (!selectedIds.length || button.disabled) {
+          return;
+        }
+        updateWorkspaceActionUrls(selectedIds);
+        const dialog = document.getElementById(`sample-action-dialog-${button.dataset.actionKey || ""}`);
+        if (dialog?.showModal) {
+          dialog.showModal();
+        }
+      });
+    });
+
+    document.querySelectorAll(".sample-action-dialog").forEach((dialog) => {
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) {
+          dialog.close();
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-sample-action-close]").forEach((button) => {
+      button.addEventListener("click", () => {
+        button.closest("dialog")?.close();
+      });
+    });
 
     clearButton?.addEventListener("click", () => {
       SampleActionSelection.clear(storageKey);
@@ -134,13 +168,103 @@
           ? `${selectedIds.length} sample${selectedIds.length === 1 ? "" : "s"} selected for batch actions`
           : "No samples are currently staged.";
       }
-      root.querySelectorAll("[data-sample-action-link]").forEach((link) => {
-        const actionUrl = link.dataset.actionUrl || DEFAULT_WORKSPACE_URL;
-        link.href = SampleActionSelection.actionUrl(selectedIds, actionUrl);
+      document.querySelectorAll("[data-sample-action-open]").forEach((button) => {
         const disabled = selectedIds.length === 0;
-        link.classList.toggle("is-disabled", disabled);
-        link.setAttribute("aria-disabled", disabled ? "true" : "false");
+        button.disabled = disabled;
+        button.classList.toggle("is-disabled", disabled);
+        button.setAttribute("aria-disabled", disabled ? "true" : "false");
       });
+      updateWorkspaceActionUrls(selectedIds);
+      renderSelectedPreview(selectedIds);
+    }
+
+    function updateWorkspaceActionUrls(selectedIds) {
+      document.querySelectorAll("[data-sample-action-download]").forEach((link) => {
+        const actionUrl = link.dataset.actionUrl || link.getAttribute("href") || DEFAULT_WORKSPACE_URL;
+        link.href = SampleActionSelection.actionUrl(selectedIds, actionUrl);
+      });
+      document.querySelectorAll("[data-sample-action-form]").forEach((form) => {
+        const actionUrl = form.dataset.actionUrl || form.getAttribute("action") || DEFAULT_WORKSPACE_URL;
+        form.action = SampleActionSelection.actionUrl(selectedIds, actionUrl);
+      });
+      document.querySelectorAll("[data-sample-action-dialog-count]").forEach((node) => {
+        node.textContent = selectedIds.length
+          ? `${selectedIds.length} selected sample${selectedIds.length === 1 ? "" : "s"} will be included in the workbook.`
+          : "No samples selected.";
+      });
+    }
+
+    async function renderSelectedPreview(selectedIds) {
+      const requestId = ++previewRequestId;
+      if (!selectedIds.length) {
+        if (preview) {
+          preview.hidden = true;
+        }
+        if (previewEmpty) {
+          previewEmpty.hidden = false;
+        }
+        if (previewBody) {
+          previewBody.innerHTML = "";
+        }
+        return;
+      }
+
+      if (preview) {
+        preview.hidden = false;
+      }
+      if (previewEmpty) {
+        previewEmpty.hidden = true;
+      }
+      if (previewSummary) {
+        previewSummary.textContent = "Loading selected sample details...";
+      }
+      if (previewBody) {
+        previewBody.innerHTML = `<tr><td colspan="6" class="muted">Loading...</td></tr>`;
+      }
+
+      try {
+        const response = await fetch(SampleActionSelection.actionUrl(selectedIds, previewUrl), {
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) {
+          throw new Error(`Preview failed with status ${response.status}`);
+        }
+        const rows = await response.json();
+        if (requestId !== previewRequestId) {
+          return;
+        }
+        if (previewSummary) {
+          previewSummary.textContent = `${rows.length} selected sample${rows.length === 1 ? "" : "s"} found.`;
+        }
+        if (previewBody) {
+          previewBody.innerHTML = rows.length
+            ? rows.map(renderPreviewRow).join("")
+            : `<tr><td colspan="6" class="muted">Selected samples were not found.</td></tr>`;
+        }
+      } catch {
+        if (requestId !== previewRequestId) {
+          return;
+        }
+        if (previewSummary) {
+          previewSummary.textContent = "Could not load selected sample details.";
+        }
+        if (previewBody) {
+          previewBody.innerHTML = `<tr><td colspan="6" class="muted">Refresh the page or return to Samples and rebuild the selection.</td></tr>`;
+        }
+      }
+    }
+
+    function renderPreviewRow(row) {
+      return `
+        <tr>
+          <td><strong>${escapeHtml(row.sample_id || "--")}</strong></td>
+          <td>${escapeHtml(row.sample_type_name || "--")}</td>
+          <td>${escapeHtml(row.study_name || "--")}</td>
+          <td>${escapeHtml(labelize(row.study_role) || "--")}</td>
+          <td>${escapeHtml(formatVolume(row))}</td>
+          <td>${escapeHtml(row.location_path || "Unplaced")}</td>
+        </tr>
+      `;
     }
   }
 
@@ -195,5 +319,27 @@
     } catch {
       return fallback;
     }
+  }
+
+  function formatVolume(row) {
+    if (row.volume === null || row.volume === undefined || row.volume === "") {
+      return "--";
+    }
+    return `${Number(row.volume).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${row.volume_units || "mL"}`;
+  }
+
+  function labelize(value) {
+    return String(value || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 })();

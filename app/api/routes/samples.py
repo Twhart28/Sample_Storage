@@ -34,6 +34,13 @@ async def list_samples(
     return sample_service.search_samples(db, _build_search_query(request))
 
 
+@router.get("/selection-preview")
+async def selection_preview(request: Request, db: Session = Depends(get_db)):
+    _ = get_current_user(request, db)
+    sample_ids = _parse_int_list(request.query_params.getlist("sample_ids"))
+    return sample_service.list_sample_items_by_ids(db, sample_ids)
+
+
 @router.post("/filter-options")
 async def sample_filter_options(
     payload: SampleFilterOptionsRequest,

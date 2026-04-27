@@ -48,6 +48,10 @@ def search_samples(db: Session, query: SampleSearchQuery) -> list[SampleListItem
     return [_build_list_item(sample) for sample in sample_repository.search(db, query)]
 
 
+def list_sample_items_by_ids(db: Session, sample_ids: list[int]) -> list[SampleListItem]:
+    return [_build_list_item(sample) for sample in sample_repository.get_by_ids(db, sample_ids)]
+
+
 def get_filter_options(db: Session, query: SampleSearchQuery, column: str) -> SampleFilterOptionsResponse:
     scoped_query = _without_column_filter(query, column)
     rows = search_samples(db, scoped_query)
@@ -152,6 +156,7 @@ def create_sample(
     user: models.User | None,
     *,
     commit: bool = True,
+    event_payload: dict | None = None,
 ) -> models.Sample:
     sample_identifier = data.sample_id.strip()
     if not sample_identifier:
@@ -188,16 +193,19 @@ def create_sample(
     db.add(sample)
     db.flush()
     db.refresh(sample)
+    create_event_payload = {
+        "sample_id": sample.sample_id,
+        "study_role": sample.study_role.value,
+        "snapshot": _sample_audit_snapshot(sample),
+    }
+    if event_payload:
+        create_event_payload.update(event_payload)
     _log_event(
         db,
         event_type=models.EventType.create_sample,
         user=user,
         sample=sample,
-        payload={
-            "sample_id": sample.sample_id,
-            "study_role": sample.study_role.value,
-            "snapshot": _sample_audit_snapshot(sample),
-        },
+        payload=create_event_payload,
     )
     _finalize(db, sample, commit)
     return sample
@@ -313,6 +321,7 @@ def place_sample(
     user: models.User | None,
     *,
     commit: bool = True,
+    event_payload: dict | None = None,
 ) -> models.SampleLocation:
     sample = sample_repository.get_by_id(db, sample_id)
     if sample is None:
@@ -320,7 +329,7 @@ def place_sample(
     position = storage_service.get_position(db, data.position_id)
     if position is None:
         raise SampleError("Position not found")
-    return _place_or_move(db, sample, position, user, commit=commit)
+    return _place_or_move(db, sample, position, user, commit=commit, event_payload=event_payload)
 
 
 def move_sample(
@@ -330,6 +339,7 @@ def move_sample(
     user: models.User | None,
     *,
     commit: bool = True,
+    event_payload: dict | None = None,
 ) -> models.SampleLocation:
     sample = sample_repository.get_by_id(db, sample_id)
     if sample is None:
@@ -339,7 +349,7 @@ def move_sample(
     position = storage_service.get_position(db, data.to_position_id)
     if position is None:
         raise SampleError("Destination position not found")
-    return _place_or_move(db, sample, position, user, commit=commit)
+    return _place_or_move(db, sample, position, user, commit=commit, event_payload=event_payload)
 
 
 def retrieve_sample(
@@ -548,6 +558,7 @@ def _place_or_move(
     user: models.User | None,
     *,
     commit: bool = True,
+    event_payload: dict | None = None,
 ) -> models.SampleLocation:
     if sample.is_archived:
         raise SampleError("Archived samples cannot be placed")
@@ -570,6 +581,13 @@ def _place_or_move(
     sample.updated_at = datetime.utcnow()
     _validate_sample_custody(sample)
     db.add(sample)
+    move_event_payload = {
+        "position_id": position.id,
+        "from_path": from_path,
+        "to_path": storage_service.storage_path_for_position(position),
+    }
+    if event_payload:
+        move_event_payload.update(event_payload)
     _log_event(
         db,
         event_type=event_type,
@@ -577,11 +595,7 @@ def _place_or_move(
         sample=sample,
         from_position_id=from_position_id,
         to_position_id=position.id,
-        payload={
-            "position_id": position.id,
-            "from_path": from_path,
-            "to_path": storage_service.storage_path_for_position(position),
-        },
+        payload=move_event_payload,
     )
     _finalize(db, existing_location, commit)
     return existing_location

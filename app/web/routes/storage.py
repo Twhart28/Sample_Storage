@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.schemas import (
     BoxCreateInput,
-    BulkBoxImportCommitInput,
     PlaceSampleInput,
     SampleSearchQuery,
     StorageNodeCreate,
@@ -43,7 +42,8 @@ async def bulk_storage_page(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission("bulk_import_storage")),
 ):
-    return _render_bulk_storage_page(request, current_user=current_user)
+    _ = (request, db, current_user)
+    return RedirectResponse("/storage?bulk=boxes", status_code=303)
 
 
 @router.get("/storage/bulk/template")
@@ -65,54 +65,6 @@ async def bulk_storage_template(
     )
 
 
-@router.get("/storage/bulk/template.csv")
-async def bulk_storage_template_csv(current_user=Depends(require_permission("bulk_import_storage"))):
-    _ = current_user
-    return Response(
-        content=bulk_import_service.box_template_csv(),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="box-import-template.csv"'},
-    )
-
-
-@router.post("/storage/bulk/preview")
-async def bulk_storage_preview(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_permission("bulk_import_storage")),
-):
-    form = await request.form()
-    raw_payload = await _extract_bulk_payload(form)
-    preview = bulk_import_service.preview_box_import(db, raw_payload)
-    return _render_bulk_storage_page(
-        request,
-        current_user=current_user,
-        raw_payload=raw_payload,
-        preview=preview,
-    )
-
-
-@router.post("/storage/bulk/commit")
-async def bulk_storage_commit(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_permission("bulk_import_storage")),
-):
-    form = await request.form()
-    raw_payload = str(form.get("raw_payload") or "")
-    result = bulk_import_service.commit_box_import(
-        db,
-        BulkBoxImportCommitInput(raw_payload=raw_payload),
-        current_user,
-    )
-    return _render_bulk_storage_page(
-        request,
-        current_user=current_user,
-        raw_payload=raw_payload,
-        result=result,
-    )
-
-
 @router.post("/storage/node")
 async def create_storage_node(
     request: Request,
@@ -128,6 +80,9 @@ async def create_storage_node(
                 notes=form.get("notes") or None,
                 node_type=form.get("node_type") or "freezer",
                 parent_id=int(form.get("parent_id")) if form.get("parent_id") else None,
+                rack_rows=int(form.get("rack_rows")) if form.get("rack_rows") else None,
+                rack_cols=int(form.get("rack_cols")) if form.get("rack_cols") else None,
+                rack_slot=(str(form.get("rack_slot")) or "").strip() or None,
             ),
             current_user,
         )
@@ -203,40 +158,6 @@ async def place_from_box(
         current_user,
     )
     return RedirectResponse(f"/boxes/{box_id}", status_code=303)
-
-
-def _render_bulk_storage_page(
-    request: Request,
-    *,
-    current_user,
-    raw_payload: str = "",
-    preview=None,
-    result=None,
-):
-    return templates.TemplateResponse(
-        "storage_bulk.html",
-        {
-            "request": request,
-            "current_user": current_user,
-            "raw_payload": raw_payload,
-            "preview": preview,
-            "result": result,
-            "template_headers": bulk_import_service.BOX_HEADERS,
-        },
-    )
-
-
-async def _extract_bulk_payload(form) -> str:
-    raw_payload = str(form.get("raw_payload") or "")
-    upload = form.get("csv_file")
-    if upload is not None and getattr(upload, "filename", ""):
-        file_bytes = await upload.read()
-        if file_bytes:
-            filename = str(getattr(upload, "filename", "")).lower()
-            if filename.endswith(".xlsx"):
-                return bulk_import_service.box_workbook_to_csv(file_bytes)
-            return file_bytes.decode("utf-8-sig")
-    return raw_payload
 
 
 def _build_box_columns(box) -> list[str]:

@@ -24,4 +24,6 @@ def build_dashboard(db: Session) -> dict:
         "unplaced_count": sum(1 for sample in all_samples if sample.custody_label == "unplaced"),
         "total_samples": len(all_samples),
         "active_workflow_count": visit_workflow_service.count_active_workflows(db),
+        "recent_draft_visit_sessions": visit_workflow_service.list_recent_draft_sessions(db, limit=5),
+        "recent_submitted_visit_sessions": visit_workflow_service.list_recent_submitted_sessions(db, limit=5),
     }

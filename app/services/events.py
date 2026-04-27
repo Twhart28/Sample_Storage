@@ -454,7 +454,9 @@ def _build_group_parent_view(children: list[EventView]) -> EventView:
         out_for_analysis_count or sum(1 for child in children if child.raw_payload.get("returned_to_storage") is False)
     )
     performed = _display_datetime(str(source_payload.get("performed_at") or ""))
-    notes = str(source_payload.get("overall_notes") or "--")
+    visit_date = _display_datetime(str(source_payload.get("visit_date") or ""))
+    participant_id = str(source_payload.get("participant_id") or "").strip()
+    notes = str(source_payload.get("overall_notes") or source_payload.get("session_notes") or "--")
     payload = {
         "batch_group_kind": group_kind,
         "batch_group_id": group_id,
@@ -465,6 +467,10 @@ def _build_group_parent_view(children: list[EventView]) -> EventView:
         "analysis_type": source_payload.get("analysis_type"),
         "performed_at": source_payload.get("performed_at"),
         "overall_notes": source_payload.get("overall_notes"),
+        "participant_id": source_payload.get("participant_id"),
+        "visit_date": source_payload.get("visit_date"),
+        "session_notes": source_payload.get("session_notes"),
+        "uploaded_workbook_filename": source_payload.get("uploaded_workbook_filename"),
         "group_event_ids": [child.id for child in children],
     }
     group_summary = [
@@ -473,6 +479,10 @@ def _build_group_parent_view(children: list[EventView]) -> EventView:
     ]
     if performed != "--":
         group_summary.append(EventContextItem(label="Performed", value=performed))
+    if visit_date != "--":
+        group_summary.append(EventContextItem(label="Visit date", value=visit_date))
+    if participant_id:
+        group_summary.append(EventContextItem(label="Participant", value=participant_id))
     group_summary.extend(
         [
             EventContextItem(label="Operator", value=latest.username or "system"),
@@ -491,6 +501,8 @@ def _build_group_parent_view(children: list[EventView]) -> EventView:
     if notes != "--":
         group_summary.append(EventContextItem(label="Notes", value=notes))
     context_parts = [workflow_type, f"{sample_count} {count_label.lower()}"]
+    if participant_id:
+        context_parts.append(participant_id)
     if destination and destination != "--":
         context_parts.append(destination)
     if has_disposition_counts:
@@ -624,9 +636,22 @@ def _format_storage_event(
     if display_action == "move_storage":
         before_path = _display_path(str(payload.get("before_path") or path))
         after_path = _display_path(str(payload.get("after_path") or path))
+        before_slot = str(payload.get("before_slot") or "").strip()
+        after_slot = str(payload.get("after_slot") or "").strip()
+        location_items = [
+            EventContextItem(label="Previous path", value=before_path),
+            EventContextItem(label="New path", value=after_path),
+        ]
+        if before_slot or after_slot:
+            location_items.extend(
+                [
+                    EventContextItem(label="Previous rack position", value=before_slot or "--"),
+                    EventContextItem(label="New rack position", value=after_slot or "--"),
+                ]
+            )
         return (
             node_name,
-            after_path,
+            after_slot if after_slot else after_path,
             None,
             _compact_pills(
                 EventContextItem(label="User", value=actor),
@@ -638,10 +663,7 @@ def _format_storage_event(
                 EventDetailSection(
                     title="Location change",
                     layout="compact",
-                    items=[
-                        EventContextItem(label="Previous path", value=before_path),
-                        EventContextItem(label="New path", value=after_path),
-                    ],
+                    items=location_items,
                 )
             ],
             "/storage",

@@ -11,8 +11,10 @@
   const thead = table.querySelector("thead");
   const tbody = table.querySelector("tbody");
   const searchInput = document.getElementById("samples-live-search");
+  const searchClearButton = document.getElementById("samples-search-clear");
   const resultCount = document.getElementById("samples-result-count");
   const chips = document.getElementById("samples-filter-chips");
+  const resetFiltersButton = document.getElementById("samples-reset-filters");
   const errorBox = document.getElementById("samples-table-error");
   const filterOverlay = document.getElementById("samples-filter-overlay");
   const filterWindow = document.getElementById("samples-filter-window");
@@ -24,6 +26,8 @@
   const selectionRemoveButton = document.getElementById("samples-analysis-remove");
   const selectionWorkspaceLink = document.getElementById("samples-analysis-start");
   const selectionClearButton = document.getElementById("samples-analysis-clear");
+  const selectionSummary = document.getElementById("samples-selection-summary");
+  const normalModeActions = Array.from(document.querySelectorAll(".samples-normal-mode-action"));
   const bulkOpenButton = document.getElementById("samples-bulk-open");
   const bulkDialog = document.getElementById("samples-bulk-dialog");
   const bulkCloseButton = document.getElementById("samples-bulk-close");
@@ -65,22 +69,34 @@
   };
   const columnMap = new Map((bootstrap.columns || []).map((column) => [column.key, column]));
   const columnWidthMap = {
-    sample_id: "108px",
-    study: "80px",
-    sample_type: "92px",
-    study_role: "96px",
+    sample_id: "104px",
+    study: "76px",
+    sample_type: "86px",
+    study_role: "104px",
     custody: "120px",
     usage: "82px",
-    volume: "84px",
-    location: "300px",
-    visit_label: "68px",
-    timepoint_label: "84px",
+    volume: "82px",
+    location: "275px",
+    visit_label: "64px",
+    timepoint_label: "100px",
     aliquot_number: "74px",
     hemolysis_classification: "84px",
-    thaw_count: "98px",
+    thaw_count: "105px",
     collection_at: "132px",
     created_at: "132px",
-    updated_at: "132px",
+    updated_at: "116px",
+  };
+  const selectionColumnWidthMap = {
+    sample_id: "96px",
+    study: "70px",
+    sample_type: "80px",
+    study_role: "94px",
+    volume: "76px",
+    location: "236px",
+    visit_label: "58px",
+    timepoint_label: "84px",
+    thaw_count: "92px",
+    updated_at: "122px",
   };
   const compactColumns = new Set([
     "sample_id",
@@ -190,13 +206,36 @@
   }
 
   searchInput.value = state.q || "";
+  syncSearchClearButton();
   renderTable();
   renderActiveState();
 
   searchInput.addEventListener("input", () => {
     state.q = searchInput.value || "";
+    syncSearchClearButton();
     window.clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(fetchRows, 280);
+  });
+
+  searchClearButton?.addEventListener("click", () => {
+    state.q = "";
+    searchInput.value = "";
+    syncSearchClearButton();
+    fetchRows();
+  });
+
+  resetFiltersButton?.addEventListener("click", () => {
+    resetAllFilters();
+    fetchRows();
+  });
+
+  chips?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clear-sample-filter]");
+    if (!button) {
+      return;
+    }
+    clearSampleFilterToken(button.dataset.clearSampleFilter || "");
+    fetchRows();
   });
 
   columnButton.addEventListener("click", (event) => {
@@ -267,6 +306,8 @@
 
   async function openFilterWindow(columnKey) {
     closeColumnPicker();
+    filterWindow.classList.remove("samples-filter-window--location");
+    filterOverlay.classList.remove("samples-filter-overlay--location");
     filterWindow.innerHTML = `
       <div class="samples-filter-window-card">
         <p class="muted">Loading...</p>
@@ -317,7 +358,11 @@
     filterWindow.innerHTML = `
       <div class="samples-filter-window-card">
         <div class="samples-filter-window-head">
-          <strong id="samples-filter-title">${escapeHtml(column.label)}</strong>
+          <div>
+            <p class="eyebrow">Sort / Filter</p>
+            <strong id="samples-filter-title">${escapeHtml(column.label)}</strong>
+            <p class="muted">Choose values below, then apply. Sorting updates immediately.</p>
+          </div>
           <button type="button" class="ghost-button samples-filter-close">Close</button>
         </div>
         <div class="samples-filter-window-body">
@@ -370,38 +415,57 @@
   }
 
   function renderLocationWindow() {
+    filterWindow.classList.add("samples-filter-window--location");
+    filterOverlay.classList.add("samples-filter-overlay--location");
     filterWindow.innerHTML = `
-      <div class="samples-filter-window-card">
+      <div class="samples-filter-window-card samples-location-filter-card">
         <div class="samples-filter-window-head">
-          <strong id="samples-filter-title">Location</strong>
+          <div>
+            <strong id="samples-filter-title">Location</strong>
+          </div>
           <button type="button" class="ghost-button samples-filter-close">Close</button>
         </div>
-        <div class="samples-filter-window-body">
-          <div class="samples-sort-actions">
+        <div class="samples-filter-window-body samples-location-filter-body">
+          <div class="samples-sort-actions samples-location-sort-actions">
             ${renderSortButtons("location")}
           </div>
-          <div class="samples-location-mode">
-            <label class="samples-option-item samples-option-card">
-              <input type="radio" name="location-filter" value="" ${state.location_state === "" ? "checked" : ""} />
-              <span class="samples-option-label">Any location</span>
-            </label>
-            <label class="samples-option-item samples-option-card">
-              <input type="radio" name="location-filter" value="placed" ${state.location_state === "placed" ? "checked" : ""} />
-              <span class="samples-option-label">Placed only</span>
-            </label>
-            <label class="samples-option-item samples-option-card">
-              <input type="radio" name="location-filter" value="unplaced" ${state.location_state === "unplaced" ? "checked" : ""} />
-              <span class="samples-option-label">Unplaced only</span>
-            </label>
-          </div>
-          <div class="samples-option-tools">
-            <button type="button" class="ghost-button samples-tool-button" data-action="expand-location-tree">Expand all</button>
-            <button type="button" class="ghost-button samples-tool-button" data-action="collapse-location-tree">Collapse all</button>
-            <button type="button" class="ghost-button samples-tool-button" data-action="clear-location-selection">Clear folders</button>
-          </div>
-          <div class="samples-location-summary" id="samples-location-summary"></div>
-          <div class="samples-location-tree-wrap" id="samples-location-tree-wrap">
-            ${renderLocationTree(storageTree)}
+          <div class="samples-location-layout">
+            <div class="samples-location-compact-bar">
+              <div class="samples-location-status-strip">
+                <strong>Placement</strong>
+                <div class="samples-location-mode samples-location-mode--compact" aria-label="Location status">
+                  <label class="samples-option-item samples-option-card">
+                    <input type="radio" name="location-filter" value="" ${state.location_state === "" ? "checked" : ""} />
+                    <span class="samples-option-label">Any</span>
+                  </label>
+                  <label class="samples-option-item samples-option-card">
+                    <input type="radio" name="location-filter" value="placed" ${state.location_state === "placed" ? "checked" : ""} />
+                    <span class="samples-option-label">Placed</span>
+                  </label>
+                  <label class="samples-option-item samples-option-card">
+                    <input type="radio" name="location-filter" value="unplaced" ${state.location_state === "unplaced" ? "checked" : ""} />
+                    <span class="samples-option-label">Unplaced</span>
+                  </label>
+                </div>
+                <div class="samples-location-summary" id="samples-location-summary" hidden></div>
+              </div>
+            </div>
+            <section class="samples-location-tree-panel">
+              <div class="samples-location-tree-head">
+                <div>
+                  <strong>Storage tree</strong>
+                </div>
+                <div class="samples-option-tools">
+                  <button type="button" class="ghost-button samples-tool-button" data-action="expand-location-tree">Expand</button>
+                  <button type="button" class="ghost-button samples-tool-button" data-action="collapse-location-tree">Collapse</button>
+                  <button type="button" class="ghost-button samples-tool-button" data-action="clear-location-selection">Clear</button>
+                </div>
+              </div>
+              <input class="samples-location-search" type="search" id="samples-location-search" aria-label="Search storage" placeholder="Search freezer, shelf, rack, box, or path" />
+              <div class="samples-location-tree-wrap" id="samples-location-tree-wrap">
+                ${renderLocationTree(storageTree)}
+              </div>
+            </section>
           </div>
         </div>
         <div class="actions-row samples-filter-window-footer">
@@ -425,10 +489,15 @@
         ? renderDateRangeFields(columnKey)
         : "";
     const clearLabel = columnKey === "sample_id" ? "Reset Sort" : "Clear";
+    const defaultSortActive = state.sort === "sample_id" && state.sort_dir === "asc";
     filterWindow.innerHTML = `
       <div class="samples-filter-window-card">
         <div class="samples-filter-window-head">
-          <strong id="samples-filter-title">${escapeHtml(column.label)}</strong>
+          <div>
+            <p class="eyebrow">Sort${rangeMarkup ? " / Filter" : ""}</p>
+            <strong id="samples-filter-title">${escapeHtml(column.label)}</strong>
+            <p class="muted">${rangeMarkup ? "Enter a range, then apply. Sorting updates immediately." : "Use this menu to adjust sorting."}</p>
+          </div>
           <button type="button" class="ghost-button samples-filter-close">Close</button>
         </div>
         <div class="samples-filter-window-body">
@@ -439,7 +508,7 @@
         </div>
         <div class="actions-row samples-filter-window-footer">
           <button type="button" data-action="apply-filter">${columnKey === "sample_id" ? "Done" : "Apply"}</button>
-          <button type="button" class="ghost-button" data-action="clear-filter">${clearLabel}</button>
+          <button type="button" class="ghost-button" data-action="clear-filter" ${columnKey === "sample_id" && defaultSortActive ? "disabled" : ""}>${clearLabel}</button>
         </div>
       </div>
     `;
@@ -453,12 +522,14 @@
       button.addEventListener("click", () => {
         state.sort = button.dataset.sortColumn;
         state.sort_dir = button.dataset.sortDir;
+        updateSortControls(columnKey);
         fetchRows();
       });
     });
     filterWindow.querySelector("[data-action='clear-sort']")?.addEventListener("click", () => {
       state.sort = "sample_id";
       state.sort_dir = "asc";
+      updateSortControls(columnKey);
       fetchRows();
     });
     filterWindow.querySelector("[data-action='apply-filter']")?.addEventListener("click", () => {
@@ -526,10 +597,59 @@
     });
 
     filterWindow.querySelector("[data-action='clear-location-selection']")?.addEventListener("click", () => {
-      filterWindow.querySelectorAll("input[name='storage-node-filter']").forEach((checkbox) => {
-        checkbox.checked = false;
+      filterWindow.querySelectorAll("input[name='storage-node-filter']").forEach((input) => {
+        input.checked = false;
       });
       updateLocationSummary();
+    });
+
+    filterWindow.querySelector("#samples-location-search")?.addEventListener("input", (event) => {
+      filterLocationTree((event.target.value || "").trim().toLowerCase());
+    });
+  }
+
+  function updateSortControls(columnKey) {
+    const defaultSortActive = state.sort === "sample_id" && state.sort_dir === "asc";
+    filterWindow.querySelectorAll("[data-action='sort']").forEach((button) => {
+      const active = state.sort === button.dataset.sortColumn && state.sort_dir === button.dataset.sortDir;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    const resetButton = filterWindow.querySelector("[data-action='clear-sort']");
+    if (resetButton) {
+      resetButton.disabled = defaultSortActive;
+    }
+    if (columnKey === "sample_id") {
+      const ascButton = filterWindow.querySelector("[data-action='sort'][data-sort-dir='asc']");
+      if (ascButton) {
+        ascButton.textContent = "Sort ↑ (default)";
+      }
+    }
+  }
+
+  function filterLocationTree(needle) {
+    const branches = Array.from(filterWindow.querySelectorAll("[data-location-branch]"));
+    branches.forEach((branch) => {
+      branch.hidden = false;
+    });
+    if (!needle) {
+      return;
+    }
+    branches.forEach((branch) => {
+      const row = branch.querySelector(":scope > .samples-location-row");
+      const ownMatch = (row?.dataset.locationSearch || "").includes(needle);
+      const descendantMatch = Array.from(branch.querySelectorAll(":scope > .samples-location-children [data-location-branch]")).some((child) => {
+        const childRow = child.querySelector(":scope > .samples-location-row");
+        return (childRow?.dataset.locationSearch || "").includes(needle);
+      });
+      branch.hidden = !ownMatch && !descendantMatch;
+      if (descendantMatch) {
+        branch.classList.remove("is-collapsed");
+        const toggle = filterWindow.querySelector(`[data-location-toggle='${branch.dataset.locationBranch}']`);
+        if (toggle) {
+          toggle.textContent = "-";
+        }
+      }
     });
   }
 
@@ -651,14 +771,17 @@
             const column = columnMap.get(key);
             const filterCount = getFilterCount(key);
             const isSorted = state.sort === key;
-            const sortIndicator = isSorted ? (state.sort_dir === "asc" ? "&uarr;" : "&darr;") : "";
+            const isDefaultSort = state.sort === "sample_id" && state.sort_dir === "asc";
+            const showSortIndicator = isSorted && !isDefaultSort;
+            const sortIndicator = showSortIndicator ? (state.sort_dir === "asc" ? "&uarr;" : "&darr;") : "";
             return `
               <th class="${getColumnClassName(key, "header")}">
-                <button type="button" class="samples-header-button" data-column-trigger="${key}">
+                <button type="button" class="samples-header-button${filterCount ? " has-filter" : ""}${showSortIndicator ? " is-sorted" : ""}" data-column-trigger="${key}" title="Sort or filter ${escapeHtml(column.label)}">
                   <span class="samples-header-label">${escapeHtml(column.label)}</span>
                   <span class="samples-header-icons">
                     ${filterCount ? `<span class="samples-filter-indicator" title="${filterCount} active filter${filterCount === 1 ? "" : "s"}">${filterCount}</span>` : ""}
-                    ${isSorted ? `<span class="samples-sort-indicator" title="Sorted ${state.sort_dir}">${sortIndicator}</span>` : ""}
+                    ${showSortIndicator ? `<span class="samples-sort-indicator" title="Sorted ${state.sort_dir}">${sortIndicator}</span>` : ""}
+                    <span class="samples-header-menu-indicator" aria-hidden="true">⌄</span>
                   </span>
                 </button>
               </th>
@@ -701,14 +824,17 @@
       return;
     }
     const minimumWidth = visibleColumns.reduce((total, key) => {
-      const width = Number.parseInt(columnWidthMap[key] || "0", 10);
+      const widthMap = canUseSampleActions && selectionMode ? selectionColumnWidthMap : columnWidthMap;
+      const width = Number.parseInt(widthMap[key] || columnWidthMap[key] || "0", 10);
       return total + (Number.isNaN(width) ? 0 : width);
-    }, canUseSampleActions && selectionMode ? 96 : 0);
+    }, canUseSampleActions && selectionMode ? 76 : 0);
     table.style.minWidth = minimumWidth ? `${minimumWidth}px` : "";
     colgroup.innerHTML = [
-      canUseSampleActions && selectionMode ? '<col class="sample-col sample-col--analysis sample-col--track" style="width:96px">' : "",
+      canUseSampleActions && selectionMode ? '<col class="sample-col sample-col--analysis sample-col--track" style="width:76px">' : "",
       ...visibleColumns.map((key) => {
-        const width = columnWidthMap[key];
+        const width = canUseSampleActions && selectionMode
+          ? (selectionColumnWidthMap[key] || columnWidthMap[key])
+          : columnWidthMap[key];
         return `<col class="${getColumnClassName(key, "col")}"${width ? ` style="width:${width}"` : ""}>`;
       }),
     ].join("");
@@ -758,20 +884,44 @@
     if (!canUseSampleActions) {
       return;
     }
+    root.classList.toggle("is-selection-mode", selectionMode);
     selectionActions.hidden = !selectionMode;
     selectionActions.classList.toggle("hidden", !selectionMode);
+    normalModeActions.forEach((action) => {
+      action.hidden = selectionMode;
+      action.classList.toggle("hidden", selectionMode);
+    });
     const selectedIds = selectedRowIds();
+    const persistedIds = sampleActionSelection.load(sampleActionsStorageKey);
     selectionAddButton.disabled = !selectionMode || selectedIds.length === 0;
     selectionRemoveButton.disabled = !selectionMode || selectedIds.length === 0;
-    selectionClearButton.disabled = sampleActionSelection.load(sampleActionsStorageKey).length === 0;
-    const persistedIds = sampleActionSelection.load(sampleActionsStorageKey);
+    selectionClearButton.disabled = persistedIds.length === 0;
     selectionWorkspaceLink.href = sampleActionSelection.actionUrl(persistedIds, sampleActionsWorkspaceUrl);
     selectionWorkspaceLink.classList.toggle("is-disabled", persistedIds.length === 0);
     selectionWorkspaceLink.setAttribute("aria-disabled", persistedIds.length === 0 ? "true" : "false");
-    selectionWorkspaceLink.textContent = persistedIds.length ? `Open actions workspace (${persistedIds.length})` : "Open actions workspace";
+    selectionWorkspaceLink.textContent = persistedIds.length ? `Open workspace (${persistedIds.length})` : "Open workspace";
     selectionToggleButton.textContent = selectionMode
-      ? "Exit Select"
+      ? "Exit"
       : persistedIds.length ? `Select (${persistedIds.length})` : "Select";
+    renderSelectionSummary(selectedIds.length, persistedIds.length);
+  }
+
+  function renderSelectionSummary(checkedCount, stagedCount) {
+    if (!selectionSummary) {
+      return;
+    }
+    selectionSummary.hidden = !selectionMode;
+    selectionSummary.classList.toggle("hidden", !selectionMode);
+    if (!selectionMode) {
+      selectionSummary.innerHTML = "";
+      return;
+    }
+    selectionSummary.innerHTML = `
+      <strong>Selection mode</strong>
+      <span>${checkedCount} checked on this page</span>
+      <span>${stagedCount} staged for actions</span>
+      <span class="samples-selection-help">Click a row to check it. Ctrl/Cmd-click adds one row; Shift-click checks a range.</span>
+    `;
   }
 
   function selectedRowIds() {
@@ -845,49 +995,197 @@
 
   function renderActiveState() {
     const activeChips = [];
-      const optionLabels = {
-        sample_type_ids: "Type",
-        study_ids: "Study",
-        study_roles: "Study Role",
-        custodies: "Custody",
-        usages: "Usage",
-        visit_labels: "Visit",
-        timepoint_labels: "Timepoint",
-      };
+    const optionLabels = {
+      sample_type_ids: "Type",
+      study_ids: "Study",
+      study_roles: "Study Role",
+      custodies: "Custody",
+      usages: "Usage",
+      visit_labels: "Visit",
+      timepoint_labels: "Timepoint",
+    };
+    if (state.q) {
+      activeChips.push(renderFilterChip("Search", state.q, "q"));
+    }
     Object.entries(optionLabels).forEach(([field, label]) => {
       if (!state[field] || !state[field].length) {
         return;
       }
-      activeChips.push(`<span class="samples-chip">${escapeHtml(label)}: ${escapeHtml(state[field].join(", "))}</span>`);
+      activeChips.push(renderFilterChip(label, formatFilterValues(field, state[field]), field));
     });
     if (state.location_state) {
-      activeChips.push(`<span class="samples-chip">Location: ${escapeHtml(state.location_state)}</span>`);
+      activeChips.push(renderFilterChip("Location", state.location_state, "location_state"));
     }
     if (state.storage_node_ids?.length) {
-      state.storage_node_ids.forEach((nodeId) => {
-        const path = locationPathMap.get(nodeId);
-        if (path) {
-          activeChips.push(`<span class="samples-chip">Location: ${escapeHtml(path)}</span>`);
-        }
-      });
+      const paths = state.storage_node_ids.map((nodeId) => locationPathMap.get(nodeId)).filter(Boolean);
+      if (paths.length) {
+        activeChips.push(renderFilterChip("Storage", paths.join("; "), "storage_node_ids"));
+      }
     }
-    appendRangeChip(activeChips, "Volume", state.volume_min, state.volume_max);
-    appendRangeChip(activeChips, "Aliquot", state.aliquot_min, state.aliquot_max);
-    appendRangeChip(activeChips, "Hemolysis", state.hemolysis_min, state.hemolysis_max);
-    appendRangeChip(activeChips, "Thaw", state.thaw_count_min, state.thaw_count_max);
-    appendRangeChip(activeChips, "Collection", state.collection_from, state.collection_to);
-    appendRangeChip(activeChips, "Registered", state.registered_from, state.registered_to);
-    appendRangeChip(activeChips, "Updated", state.updated_from, state.updated_to);
-    chips.innerHTML = activeChips.join("");
+    appendRangeChip(activeChips, "Volume", state.volume_min, state.volume_max, "volume");
+    appendRangeChip(activeChips, "Aliquot", state.aliquot_min, state.aliquot_max, "aliquot");
+    appendRangeChip(activeChips, "Hemolysis", state.hemolysis_min, state.hemolysis_max, "hemolysis");
+    appendRangeChip(activeChips, "Thaw", state.thaw_count_min, state.thaw_count_max, "thaw_count");
+    appendRangeChip(activeChips, "Collection", state.collection_from, state.collection_to, "collection");
+    appendRangeChip(activeChips, "Registered", state.registered_from, state.registered_to, "registered");
+    appendRangeChip(activeChips, "Updated", state.updated_from, state.updated_to, "updated");
+    chips.innerHTML = activeChips.length ? activeChips.join("") : `<span class="samples-filter-empty">No active filters</span>`;
     resultCount.textContent = `${rows.length} sample${rows.length === 1 ? "" : "s"}`;
+    const showReset = hasTableAdjustments();
+    resetFiltersButton.hidden = !showReset;
+    resetFiltersButton.classList.toggle("hidden", !showReset);
   }
 
-  function appendRangeChip(target, label, fromValue, toValue) {
+  function appendRangeChip(target, label, fromValue, toValue, token) {
     if (!fromValue && !toValue) {
       return;
     }
     const value = [fromValue || "--", toValue || "--"].join(" to ");
-    target.push(`<span class="samples-chip">${escapeHtml(label)}: ${escapeHtml(value)}</span>`);
+    target.push(renderFilterChip(label, value, token));
+  }
+
+  function renderFilterChip(label, value, token) {
+    return `
+      <button type="button" class="samples-chip samples-chip-button" data-clear-sample-filter="${escapeHtml(token)}" title="Remove ${escapeHtml(label)} filter">
+        <span>${escapeHtml(label)}: ${escapeHtml(value)}</span>
+        <span aria-hidden="true">×</span>
+      </button>
+    `;
+  }
+
+  function formatFilterValues(field, values) {
+    return values.map((value) => labelForFilterValue(field, value)).join(", ");
+  }
+
+  function labelForFilterValue(field, value) {
+    const textValue = String(value);
+    if (field === "study_ids") {
+      return rows.find((row) => String(row.study_id) === textValue)?.study_name || textValue;
+    }
+    if (field === "sample_type_ids") {
+      return rows.find((row) => String(row.sample_type_id) === textValue)?.sample_type_name || textValue;
+    }
+    return textValue;
+  }
+
+  function clearSampleFilterToken(token) {
+    if (token === "q") {
+      state.q = "";
+      searchInput.value = "";
+      syncSearchClearButton();
+      return;
+    }
+    if ([
+      "sample_type_ids",
+      "study_ids",
+      "study_roles",
+      "custodies",
+      "usages",
+      "visit_labels",
+      "timepoint_labels",
+      "storage_node_ids",
+    ].includes(token)) {
+      state[token] = [];
+      return;
+    }
+    if (token === "location_state") {
+      state.location_state = "";
+      return;
+    }
+    const rangeTokens = {
+      volume: ["volume_min", "volume_max"],
+      aliquot: ["aliquot_min", "aliquot_max"],
+      hemolysis: ["hemolysis_min", "hemolysis_max"],
+      thaw_count: ["thaw_count_min", "thaw_count_max"],
+      collection: ["collection_from", "collection_to"],
+      registered: ["registered_from", "registered_to"],
+      updated: ["updated_from", "updated_to"],
+    };
+    const rangeFields = rangeTokens[token];
+    if (rangeFields) {
+      rangeFields.forEach((field) => {
+        state[field] = "";
+      });
+    }
+  }
+
+  function resetAllFilters() {
+    state.q = "";
+    searchInput.value = "";
+    syncSearchClearButton();
+    [
+      "sample_type_ids",
+      "study_ids",
+      "study_roles",
+      "custodies",
+      "usages",
+      "visit_labels",
+      "timepoint_labels",
+      "storage_node_ids",
+    ].forEach((field) => {
+      state[field] = [];
+    });
+    state.location_state = "";
+    [
+      "aliquot_min",
+      "aliquot_max",
+      "hemolysis_min",
+      "hemolysis_max",
+      "thaw_count_min",
+      "thaw_count_max",
+      "volume_min",
+      "volume_max",
+      "collection_from",
+      "collection_to",
+      "registered_from",
+      "registered_to",
+      "updated_from",
+      "updated_to",
+    ].forEach((field) => {
+      state[field] = "";
+    });
+    state.sort = "sample_id";
+    state.sort_dir = "asc";
+  }
+
+  function hasTableAdjustments() {
+    return Boolean(
+      state.q ||
+        state.location_state ||
+        state.storage_node_ids?.length ||
+        state.sample_type_ids?.length ||
+        state.study_ids?.length ||
+        state.study_roles?.length ||
+        state.custodies?.length ||
+        state.usages?.length ||
+        state.visit_labels?.length ||
+        state.timepoint_labels?.length ||
+        state.aliquot_min ||
+        state.aliquot_max ||
+        state.hemolysis_min ||
+        state.hemolysis_max ||
+        state.thaw_count_min ||
+        state.thaw_count_max ||
+        state.volume_min ||
+        state.volume_max ||
+        state.collection_from ||
+        state.collection_to ||
+        state.registered_from ||
+        state.registered_to ||
+        state.updated_from ||
+        state.updated_to ||
+        state.sort !== "sample_id" ||
+        state.sort_dir !== "asc"
+    );
+  }
+
+  function syncSearchClearButton() {
+    if (!searchClearButton) {
+      return;
+    }
+    const hasSearch = !!state.q;
+    searchClearButton.hidden = !hasSearch;
+    searchClearButton.classList.toggle("hidden", !hasSearch);
   }
 
   function getFilterCount(columnKey) {
@@ -1114,10 +1412,14 @@
   }
 
   function renderSortButtons(columnKey) {
+    const ascActive = state.sort === columnKey && state.sort_dir === "asc";
+    const descActive = state.sort === columnKey && state.sort_dir === "desc";
+    const defaultSortActive = state.sort === "sample_id" && state.sort_dir === "asc";
+    const ascLabel = columnKey === "sample_id" ? "Sort ↑ (default)" : "Sort ↑";
     return `
-      <button type="button" class="ghost-button samples-sort-button" data-action="sort" data-sort-column="${columnKey}" data-sort-dir="asc" title="Sort ascending">Ascending</button>
-      <button type="button" class="ghost-button samples-sort-button" data-action="sort" data-sort-column="${columnKey}" data-sort-dir="desc" title="Sort descending">Descending</button>
-      <button type="button" class="ghost-button samples-sort-button" data-action="clear-sort" title="Clear sort">Clear Sort</button>
+      <button type="button" class="ghost-button samples-sort-button${ascActive ? " is-active" : ""}" data-action="sort" data-sort-column="${columnKey}" data-sort-dir="asc" title="Sort ascending" aria-pressed="${ascActive ? "true" : "false"}">${ascLabel}</button>
+      <button type="button" class="ghost-button samples-sort-button${descActive ? " is-active" : ""}" data-action="sort" data-sort-column="${columnKey}" data-sort-dir="desc" title="Sort descending" aria-pressed="${descActive ? "true" : "false"}">Sort ↓</button>
+      <button type="button" class="ghost-button samples-sort-button" data-action="clear-sort" title="Reset to sample ID sort" ${defaultSortActive ? "disabled" : ""}>Reset sort</button>
     `;
   }
 
@@ -1165,9 +1467,10 @@
     const hasChildren = Array.isArray(node.children) && node.children.length > 0;
     const selected = state.storage_node_ids.includes(node.id);
     const collapsed = depth > 0 ? " is-collapsed" : "";
+    const searchText = [node.display_name, node.node_type, locationPathMap.get(node.id) || ""].join(" ").toLowerCase();
     return `
       <div class="samples-location-branch${collapsed}" data-location-branch="${node.id}" data-location-depth="${depth}">
-        <div class="samples-location-row" style="--location-depth:${depth}">
+        <div class="samples-location-row" style="--location-depth:${depth}" data-location-search="${escapeHtml(searchText)}">
           ${hasChildren
             ? `<button type="button" class="tree-toggle samples-location-toggle" data-location-toggle="${node.id}">${depth > 0 ? "+" : "-"}</button>`
             : `<span class="tree-spacer"></span>`}
@@ -1184,9 +1487,6 @@
 
   function updateLocationSummary() {
     const summary = document.getElementById("samples-location-summary");
-    if (!summary) {
-      return;
-    }
     const selectedIds = Array.from(filterWindow.querySelectorAll("input[name='storage-node-filter']:checked"))
       .map((input) => Number.parseInt(input.value, 10))
       .filter((value) => !Number.isNaN(value));
@@ -1196,6 +1496,9 @@
       filterWindow.querySelectorAll("input[name='storage-node-filter']").forEach((checkbox) => {
         checkbox.checked = normalizedIds.includes(Number.parseInt(checkbox.value, 10));
       });
+    }
+    if (!summary) {
+      return;
     }
     const labels = normalizedIds.map((nodeId) => locationPathMap.get(nodeId)).filter(Boolean);
     if (mode === "unplaced") {
@@ -1207,7 +1510,7 @@
       return;
     }
     if (!labels.length) {
-      summary.innerHTML = `<span class="muted">Select a freezer, shelf, rack, or box to filter by that branch.</span>`;
+      summary.innerHTML = `<span class="samples-filter-empty">No branch selected</span>`;
       return;
     }
     summary.innerHTML = labels
@@ -1289,6 +1592,7 @@
   function closeFilterWindow() {
     filterOverlay.hidden = true;
     filterOverlay.classList.add("hidden");
+    filterOverlay.classList.remove("samples-filter-overlay--location");
   }
 
   function closeColumnPicker() {

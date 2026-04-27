@@ -33,7 +33,7 @@
 
 <section class="split-grid">
   {% if current_user and has_permission(current_user, 'execute_visits') %}
-    <article class="card">
+    <article class="card dashboard-workflow-card">
       <div class="section-head">
         <h2>Study Workflows</h2>
         <a href="/visit-workflows">Open workflows</a>
@@ -43,6 +43,44 @@
         <a class="button" href="/visit-workflows">Start visit workflow</a>
       </div>
       <p class="muted">{{ active_workflow_count }} active workflow{{ '' if active_workflow_count == 1 else 's' }}</p>
+      <div class="dashboard-workflow-recent">
+        <div>
+          <h3>Drafts</h3>
+          <div class="stack-list compact-stack-list">
+            {% for session in recent_draft_visit_sessions %}
+              <a class="stack-row" href="/visit-workflows/{{ session.id }}">
+                <span>
+                  <strong>{{ session.study_name }} / {{ session.participant_id }}</strong>
+                </span>
+                <span>
+                  <em>Draft</em>
+                  <small>{{ format_datetime(session.updated_at) }}</small>
+                </span>
+              </a>
+            {% else %}
+              <p class="muted">No draft sessions.</p>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <h3>Submitted</h3>
+          <div class="stack-list compact-stack-list">
+            {% for session in recent_submitted_visit_sessions %}
+              <a class="stack-row" href="/visit-workflows/{{ session.id }}">
+                <span>
+                  <strong>{{ session.study_name }} / {{ session.participant_id }}</strong>
+                </span>
+                <span>
+                  <em>Completed</em>
+                  <small>{{ format_datetime(session.completed_at or session.updated_at) }}</small>
+                </span>
+              </a>
+            {% else %}
+              <p class="muted">No submitted sessions.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
     </article>
   {% endif %}
   <article class="card">

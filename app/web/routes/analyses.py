@@ -28,6 +28,7 @@ async def sample_actions_workspace(request: Request, db: Session = Depends(get_d
                 "sample_ids": _parse_sample_ids(request),
                 "storage_key": sample_actions_service.SELECTION_STORAGE_KEY,
                 "actions": sample_actions_service.available_actions(current_user),
+                "preview_url": "/api/samples/selection-preview",
             },
         },
     )

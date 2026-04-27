@@ -430,8 +430,9 @@ class RouteWorkflowTests(unittest.TestCase):
         modified["sample_Import"]["I2"] = 1.0
         modified["sample_Import"]["K2"] = 0
         modified["sample_Import"]["M2"] = "03/28/26 09:10"
-        modified["sample_Import"]["N2"] = "Visit Box"
-        modified["sample_Import"]["O2"] = "A1"
+        modified["sample_Import"]["N2"] = "specific"
+        modified["sample_Import"]["O2"] = "Visit Box"
+        modified["sample_Import"]["P2"] = "A1"
         buffer = BytesIO()
         modified.save(buffer)
 

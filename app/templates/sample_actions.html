@@ -17,17 +17,44 @@
     <div class="actions-row">
       <button type="button" class="ghost-button" id="sample-actions-clear-selection">Clear selection</button>
     </div>
+    <div class="sample-actions-preview" id="sample-actions-preview" hidden>
+      <div class="sample-actions-preview-head">
+        <div>
+          <h2>Selected Samples</h2>
+          <p class="muted" id="sample-actions-preview-summary">Loading selected samples...</p>
+        </div>
+      </div>
+      <div class="sample-actions-preview-table-wrap">
+        <table class="bulk-table sample-actions-preview-table">
+          <thead>
+            <tr>
+              <th>Sample ID</th>
+              <th>Type</th>
+              <th>Study</th>
+              <th>Role</th>
+              <th>Volume</th>
+              <th>Location</th>
+            </tr>
+          </thead>
+          <tbody id="sample-actions-preview-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="sample-actions-empty" id="sample-actions-preview-empty" hidden>
+      <strong>No samples selected.</strong>
+      <span>Go back to Samples, turn on Select mode, and add samples before starting a batch action.</span>
+    </div>
     <script id="sample-actions-workspace-bootstrap" type="application/json">{{ bootstrap | tojson }}</script>
   </div>
 </section>
 
 <section class="workspace-grid">
   {% for action in actions %}
-    <article class="card">
+    <article class="card sample-action-card">
       <h2>{{ action.label }}</h2>
       <p class="muted">{{ action.description }}</p>
       <div class="actions-row">
-        <a class="button" href="{{ action.workspace_url }}" data-sample-action-link data-action-url="{{ action.workspace_url }}">Open {{ action.label }}</a>
+        <button type="button" class="button" data-sample-action-open data-action-key="{{ action.action_key }}">Open {{ action.label }}</button>
       </div>
     </article>
   {% else %}
@@ -36,6 +63,36 @@
     </article>
   {% endfor %}
 </section>
+
+{% for action in actions %}
+  <dialog class="storage-dialog sample-action-dialog" id="sample-action-dialog-{{ action.action_key }}">
+    <div class="storage-dialog-form sample-action-dialog-form">
+      <div class="samples-bulk-head">
+        <div>
+          <p class="eyebrow">Batch Action</p>
+          <h2>{{ action.label }}</h2>
+          <p class="muted">{{ action.instructions }}</p>
+        </div>
+        <button type="button" class="ghost-button sample-action-dialog-close" data-sample-action-close>Close</button>
+      </div>
+
+      <div class="sample-action-dialog-count" data-sample-action-dialog-count></div>
+
+      <div class="samples-bulk-actions sample-action-dialog-actions">
+        <a class="bulk-download-card" href="{{ action.download_url }}" data-sample-action-download data-action-url="{{ action.download_url }}">
+          <strong>{{ action.download_label }}</strong>
+          <span>Prefilled with selected samples</span>
+        </a>
+        <form method="post" action="{{ action.preview_url }}" enctype="multipart/form-data" class="samples-bulk-upload-field" data-sample-action-form data-action-url="{{ action.preview_url }}">
+          <input type="hidden" name="raw_payload" value="" />
+          <span>{{ action.upload_label }}</span>
+          <input type="file" name="{{ action.file_field }}" accept=".xlsx" />
+          <button type="submit">{{ action.upload_label }}</button>
+        </form>
+      </div>
+    </div>
+  </dialog>
+{% endfor %}
 {% endblock %}
 
 {% block scripts %}

@@ -144,12 +144,17 @@ class Sample(Base):
 
 class StorageNode(Base):
     __tablename__ = "storage_nodes"
+    __table_args__ = (UniqueConstraint("parent_id", "rack_slot_row", "rack_slot_col", name="uq_storage_sibling_rack_slot"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     node_type: Mapped[StorageNodeType] = mapped_column(SqlEnum(StorageNodeType))
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("storage_nodes.id"))
+    rack_rows: Mapped[int | None] = mapped_column(Integer)
+    rack_cols: Mapped[int | None] = mapped_column(Integer)
+    rack_slot_row: Mapped[int | None] = mapped_column(Integer)
+    rack_slot_col: Mapped[int | None] = mapped_column(Integer)
 
     parent: Mapped[StorageNode | None] = relationship(
         "StorageNode", remote_side=[id], back_populates="children"
@@ -172,6 +177,18 @@ class StorageNode(Base):
             names.append(current.display_name)
             current = current.parent
         return list(reversed(names))
+
+    @property
+    def rack_layout_label(self) -> str | None:
+        if self.node_type != StorageNodeType.rack or self.rack_rows is None or self.rack_cols is None:
+            return None
+        return _rack_layout_label(self.rack_rows, self.rack_cols)
+
+    @property
+    def rack_slot_label(self) -> str | None:
+        if self.node_type != StorageNodeType.box or self.rack_slot_row is None or self.rack_slot_col is None:
+            return None
+        return _rack_slot_label(self.rack_slot_row, self.rack_slot_col)
 
 
 class StoragePosition(Base):
@@ -199,6 +216,27 @@ class StoragePosition(Base):
     )
 
     __table_args__ = (UniqueConstraint("box_id", "row", "col", name="uq_box_row_col"),)
+
+
+def _grid_label(row: int, col: int) -> str:
+    return f"{_grid_column_label(col)}{row}"
+
+
+def _grid_column_label(col: int) -> str:
+    letters: list[str] = []
+    current = col
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
+
+
+def _rack_layout_label(rows: int, cols: int) -> str:
+    return f"{rows} rows x {cols} cols"
+
+
+def _rack_slot_label(row: int, col: int) -> str:
+    return _grid_label(row, col)
 
 
 class SampleLocation(Base):

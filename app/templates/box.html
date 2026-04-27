@@ -6,6 +6,9 @@
       <p class="eyebrow">Box View</p>
       <h1>{{ box.box_name }}</h1>
       <p class="muted">{{ box.box_path }}</p>
+      {% if box.rack_slot_label %}
+        <p class="muted" title="Rack position: column {{ box.rack_slot_col_label }}, row {{ box.rack_slot_row }}">Rack position {{ box.rack_slot_label }}</p>
+      {% endif %}
     </div>
     {% if box.positions %}
       <div class="box-view-controls" data-box-controls>

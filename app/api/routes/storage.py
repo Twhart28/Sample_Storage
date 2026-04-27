@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.domain import models
 from app.schemas import (
     BoxCreateInput,
     BulkBoxImportCommitInput,
@@ -43,6 +44,11 @@ async def create_storage_node(
         "display_name": node.display_name,
         "node_type": node.node_type.value,
         "parent_id": node.parent_id,
+        "rack_layout_label": node.rack_layout_label,
+        "rack_slot_row": node.rack_slot_row,
+        "rack_slot_col": node.rack_slot_col,
+        "rack_slot_col_label": models._grid_column_label(node.rack_slot_col) if node.rack_slot_col else None,
+        "rack_slot_label": node.rack_slot_label,
     }
 
 
@@ -65,6 +71,11 @@ async def update_storage_node(
         "display_name": node.display_name,
         "node_type": node.node_type.value,
         "parent_id": node.parent_id,
+        "rack_layout_label": node.rack_layout_label,
+        "rack_slot_row": node.rack_slot_row,
+        "rack_slot_col": node.rack_slot_col,
+        "rack_slot_col_label": models._grid_column_label(node.rack_slot_col) if node.rack_slot_col else None,
+        "rack_slot_label": node.rack_slot_label,
     }
 
 
@@ -134,6 +145,24 @@ async def preview_storage_bulk(
 ):
     _ = (request, current_user)
     return bulk_import_service.preview_box_import(db, payload.raw_payload)
+
+
+@router.post("/storage/bulk/preview-upload")
+async def preview_storage_bulk_upload(
+    request: Request,
+    import_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission("bulk_import_storage")),
+):
+    _ = (request, current_user)
+    file_bytes = await import_file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Upload a completed Excel template.")
+    filename = str(import_file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Box bulk import only accepts .xlsx workbooks.")
+    raw_payload = bulk_import_service.box_workbook_to_csv(file_bytes)
+    return bulk_import_service.preview_box_import(db, raw_payload)
 
 
 @router.post("/storage/bulk/commit")

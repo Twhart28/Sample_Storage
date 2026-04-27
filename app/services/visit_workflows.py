@@ -63,7 +63,13 @@ def count_active_workflows(db: Session) -> int:
     return len(list_active_workflows(db))
 
 
-def list_recent_sessions(db: Session, limit: int = 8) -> list[VisitSessionView]:
+def list_recent_sessions(
+    db: Session,
+    limit: int = 8,
+    *,
+    status: models.VisitSessionStatus | str | None = None,
+    submitted_only: bool = False,
+) -> list[VisitSessionView]:
     stmt = (
         select(models.VisitSession)
         .options(
@@ -78,10 +84,25 @@ def list_recent_sessions(db: Session, limit: int = 8) -> list[VisitSessionView]:
             .selectinload(models.Sample.location)
             .joinedload(models.SampleLocation.position),
         )
-        .order_by(models.VisitSession.updated_at.desc())
-        .limit(limit)
     )
+    if status is not None:
+        status_value = status if isinstance(status, models.VisitSessionStatus) else models.VisitSessionStatus(str(status))
+        stmt = stmt.where(models.VisitSession.status == status_value)
+    if submitted_only:
+        stmt = stmt.where(models.VisitSession.status == models.VisitSessionStatus.completed)
+        stmt = stmt.order_by(models.VisitSession.completed_at.desc().nullslast(), models.VisitSession.updated_at.desc())
+    else:
+        stmt = stmt.order_by(models.VisitSession.updated_at.desc())
+    stmt = stmt.limit(limit)
     return [_build_session_view(session) for session in db.execute(stmt).unique().scalars().all()]
+
+
+def list_recent_draft_sessions(db: Session, limit: int = 5) -> list[VisitSessionView]:
+    return list_recent_sessions(db, limit=limit, status=models.VisitSessionStatus.draft)
+
+
+def list_recent_submitted_sessions(db: Session, limit: int = 5) -> list[VisitSessionView]:
+    return list_recent_sessions(db, limit=limit, submitted_only=True)
 
 
 def get_workflow_for_study(db: Session, study_id: int) -> StudyWorkflowView:
@@ -304,6 +325,7 @@ def commit_visit_workbook(
     studies = {item.name.lower(): item.id for item in sample_service.list_studies(db)}
     position_lookup = _build_position_lookup(db)
     created_sample_ids: list[int] = []
+    group_payload = _visit_submission_group_payload(session, preview.sample_preview.total_rows)
 
     try:
         for row in preview.sample_preview.rows:
@@ -322,12 +344,19 @@ def commit_visit_workbook(
                 notes=row.notes,
                 collection_at=_parse_datetime(row.collection_at),
             )
-            sample = sample_service.create_sample(db, payload, user, commit=False)
+            sample = sample_service.create_sample(db, payload, user, commit=False, event_payload=group_payload)
             if row.assigned_box_name and row.assigned_position:
                 position_id = position_lookup.get((row.assigned_box_name.lower(), row.assigned_position.upper()))
                 if position_id is None:
                     raise VisitWorkflowError("Assigned visit workbook position was not found during commit")
-                sample_service.place_sample(db, sample.id, PlaceSampleInput(position_id=position_id), user, commit=False)
+                sample_service.place_sample(
+                    db,
+                    sample.id,
+                    PlaceSampleInput(position_id=position_id),
+                    user,
+                    commit=False,
+                    event_payload=group_payload,
+                )
             visit_note = f"Created from visit session #{session.id} for participant {session.participant_id}"
             db.add(models.SampleNoteEntry(sample_id=sample.id, user_id=user.id if user else None, text=visit_note))
             db.add(models.VisitSessionSample(visit_session_id=session.id, sample_id=sample.id))
@@ -513,6 +542,26 @@ def _build_session_view(session: models.VisitSession) -> VisitSessionView:
         summary_sections=[],
         created_samples=created_samples,
     )
+
+
+def _visit_submission_group_payload(session: models.VisitSession, sample_count: int) -> dict[str, str | int | None]:
+    title = f"{session.study.display_name} visit submission"
+    return {
+        "batch_group_kind": "visit_workflow",
+        "batch_group_id": str(session.id),
+        "batch_group_title": title,
+        "batch_action_label": "Visit submission",
+        "batch_workflow_label": "Visit workflow",
+        "batch_sample_count": sample_count,
+        "batch_count_label": "Created samples",
+        "visit_session_id": session.id,
+        "workflow_label": session.workflow.label,
+        "study": session.study.display_name,
+        "participant_id": session.participant_id,
+        "visit_date": session.visit_date.isoformat() if session.visit_date else None,
+        "uploaded_workbook_filename": session.uploaded_workbook_filename,
+        "session_notes": session.session_notes,
+    }
 
 
 def _mark_step(session: models.VisitSession, step_key: str) -> None:

@@ -54,6 +54,7 @@ def search_boxes(db: Session, query: str) -> list[StorageNodeView]:
                 node.name,
                 node.display_name,
                 _node_path(node),
+                node.rack_slot_label or "",
                 node.notes or "",
             ]
             if part
@@ -83,6 +84,10 @@ def get_box_view(db: Session, box_id: int) -> StorageLookupView | None:
         box_id=box.id,
         box_name=box.display_name,
         box_path="/".join(box.path_names()),
+        rack_slot_row=box.rack_slot_row,
+        rack_slot_col=box.rack_slot_col,
+        rack_slot_col_label=models._grid_column_label(box.rack_slot_col) if box.rack_slot_col else None,
+        rack_slot_label=box.rack_slot_label,
         positions=[
             StoragePositionView(
                 id=position.id,
@@ -114,11 +119,22 @@ def create_storage_node(
     parent = _validate_parent(db, data.node_type, data.parent_id)
     name = data.name.strip()
     _ensure_unique_name(db, data.node_type, name)
+    rack_rows, rack_cols = _validated_rack_layout(data.node_type, data.rack_rows, data.rack_cols)
+    rack_slot_row, rack_slot_col = _validated_rack_slot(
+        db,
+        node_type=data.node_type,
+        parent=parent,
+        rack_slot=data.rack_slot,
+    )
     node = models.StorageNode(
         name=name,
         notes=_clean_optional_text(data.notes),
         node_type=models.StorageNodeType(data.node_type),
         parent_id=parent.id if parent else None,
+        rack_rows=rack_rows,
+        rack_cols=rack_cols,
+        rack_slot_row=rack_slot_row,
+        rack_slot_col=rack_slot_col,
     )
     db.add(node)
     db.flush()
@@ -134,6 +150,8 @@ def create_storage_node(
                 "name": node.name,
                 "parent_id": node.parent_id,
                 "path": _node_path(node),
+                "rack_layout": node.rack_layout_label,
+                "rack_slot": node.rack_slot_label,
             },
         )
     _finalize(db, node, commit)
@@ -154,6 +172,17 @@ def update_storage_node(
     before_snapshot = _storage_snapshot(node)
     node.name = name
     node.notes = _clean_optional_text(data.notes)
+    if node.node_type == models.StorageNodeType.rack:
+        node.rack_rows, node.rack_cols = _validated_rack_layout(node.node_type.value, data.rack_rows, data.rack_cols)
+        _ensure_rack_layout_can_fit_children(node)
+    elif node.node_type == models.StorageNodeType.box:
+        node.rack_slot_row, node.rack_slot_col = _validated_rack_slot(
+            db,
+            node_type=node.node_type.value,
+            parent=node.parent,
+            rack_slot=data.rack_slot,
+            exclude_node_id=node.id,
+        )
     db.add(node)
     db.flush()
     db.refresh(node)
@@ -191,7 +220,12 @@ def move_storage_node(
     if parent and _is_descendant(parent, node):
         raise StorageError("Cannot move a node inside its own subtree")
     before_path = _node_path(node)
+    before_slot = node.rack_slot_label
+    before_parent_id = node.parent_id
     node.parent_id = parent.id if parent else None
+    if node.node_type == models.StorageNodeType.box and node.parent_id != before_parent_id:
+        node.rack_slot_row = None
+        node.rack_slot_col = None
     db.add(node)
     db.flush()
     db.refresh(node)
@@ -207,6 +241,8 @@ def move_storage_node(
             "parent_id": node.parent_id,
             "before_path": before_path,
             "after_path": _node_path(node),
+            "before_slot": before_slot,
+            "after_slot": node.rack_slot_label,
         },
     )
     db.commit()
@@ -228,11 +264,16 @@ def move_storage_nodes(
 
     moved_nodes: list[models.StorageNode] = []
     before_paths = {node.id: _node_path(node) for node in nodes}
+    before_slots = {node.id: node.rack_slot_label for node in nodes}
+    before_parent_ids = {node.id: node.parent_id for node in nodes}
     batch_group_id = uuid4().hex
     destination_path = _node_path(target_parent) if target_parent else "Root"
     batch_group_title = f"Move to {destination_path}"
     for node in nodes:
         node.parent_id = target_parent.id if target_parent else None
+        if node.node_type == models.StorageNodeType.box and node.parent_id != before_parent_ids[node.id]:
+            node.rack_slot_row = None
+            node.rack_slot_col = None
         db.add(node)
         moved_nodes.append(node)
 
@@ -252,6 +293,8 @@ def move_storage_nodes(
                 "parent_id": node.parent_id,
                 "before_path": before_paths[node.id],
                 "after_path": _node_path(node),
+                "before_slot": before_slots[node.id],
+                "after_slot": node.rack_slot_label,
                 "batch_group_kind": "storage_move_batch",
                 "batch_group_id": batch_group_id,
                 "batch_group_title": batch_group_title,
@@ -389,6 +432,13 @@ def _node_view(node: models.StorageNode) -> StorageNodeView:
         can_accept_children=bool(child_types),
         filled_positions=filled_positions,
         total_positions=total_positions,
+        rack_layout_rows=node.rack_rows,
+        rack_layout_cols=node.rack_cols,
+        rack_layout_label=node.rack_layout_label,
+        rack_slot_row=node.rack_slot_row,
+        rack_slot_col=node.rack_slot_col,
+        rack_slot_col_label=models._grid_column_label(node.rack_slot_col) if node.rack_slot_col else None,
+        rack_slot_label=node.rack_slot_label,
         child_types=child_types,
         children=[_node_view(child) for child in sorted(node.children, key=_storage_sort_key)],
     )
@@ -486,6 +536,8 @@ def _storage_snapshot(node: models.StorageNode) -> dict[str, str]:
         "name": node.name,
         "notes": node.notes or "--",
         "path": _node_path(node),
+        "rack_layout": node.rack_layout_label or "--",
+        "rack_slot": node.rack_slot_label or "--",
     }
 
 
@@ -494,6 +546,8 @@ def _storage_snapshot_changes(before: dict[str, str], after: dict[str, str]) -> 
         "name": "Name",
         "notes": "Notes",
         "path": "Path",
+        "rack_layout": "Rack Layout",
+        "rack_slot": "Rack Position",
     }
     changes: list[dict[str, str]] = []
     for field, label in labels.items():
@@ -512,7 +566,125 @@ def _storage_snapshot_changes(before: dict[str, str], after: dict[str, str]) -> 
 
 
 def _position_label(row: int, col: int) -> str:
-    return f"{chr(64 + col)}{row}"
+    return models._grid_label(row, col)
+
+
+def _validated_rack_layout(node_type: str, rack_rows: int | None, rack_cols: int | None) -> tuple[int | None, int | None]:
+    if node_type != "rack":
+        if rack_rows is not None or rack_cols is not None:
+            raise StorageError("Only racks can have a rack layout")
+        return (None, None)
+    if rack_rows is None and rack_cols is None:
+        return (None, None)
+    if rack_rows is None or rack_cols is None:
+        raise StorageError("Rack layout requires both rows and columns")
+    if rack_rows <= 0 or rack_cols <= 0:
+        raise StorageError("Rack layout rows and columns must be greater than zero")
+    return (rack_rows, rack_cols)
+
+
+def _validated_rack_slot(
+    db: Session,
+    *,
+    node_type: str,
+    parent: models.StorageNode | None,
+    rack_slot: str | None,
+    exclude_node_id: int | None = None,
+) -> tuple[int | None, int | None]:
+    normalized = _clean_optional_text(rack_slot)
+    if node_type != "box":
+        if normalized:
+            raise StorageError("Only boxes can have a rack position")
+        return (None, None)
+    if not normalized:
+        return (None, None)
+    if parent is None or parent.node_type != models.StorageNodeType.rack:
+        raise StorageError("Rack positions can only be used for boxes directly inside a rack")
+    if parent.rack_rows is None or parent.rack_cols is None:
+        raise StorageError("This rack does not have a layout configured")
+    row, col = _parse_rack_slot_label(normalized)
+    if row is None or col is None:
+        raise StorageError("Rack position must use a label like A2 or C4")
+    if row > parent.rack_rows or col > parent.rack_cols:
+        raise StorageError(f"Rack position must fit inside the rack layout ({parent.rack_layout_label})")
+    _ensure_unique_rack_slot(db, parent.id, row, col, exclude_node_id=exclude_node_id)
+    return (row, col)
+
+
+def _ensure_unique_rack_slot(
+    db: Session,
+    parent_id: int,
+    row: int,
+    col: int,
+    *,
+    exclude_node_id: int | None = None,
+) -> None:
+    stmt = select(models.StorageNode).where(
+        models.StorageNode.parent_id == parent_id,
+        models.StorageNode.rack_slot_row == row,
+        models.StorageNode.rack_slot_col == col,
+    )
+    if exclude_node_id is not None:
+        stmt = stmt.where(models.StorageNode.id != exclude_node_id)
+    duplicate = db.execute(stmt).scalar_one_or_none()
+    if duplicate is not None:
+        raise StorageError(f"Rack position {models._rack_slot_label(row, col)} is already assigned in this rack")
+
+
+def _ensure_rack_layout_can_fit_children(rack: models.StorageNode) -> None:
+    if rack.node_type != models.StorageNodeType.rack:
+        return
+    if rack.rack_rows is None or rack.rack_cols is None:
+        if any(child.rack_slot_row is not None or child.rack_slot_col is not None for child in rack.children):
+            raise StorageError("Clear assigned box rack positions before removing the rack layout")
+        return
+    for child in rack.children:
+        if child.rack_slot_row is None or child.rack_slot_col is None:
+            continue
+        if child.rack_slot_row > rack.rack_rows or child.rack_slot_col > rack.rack_cols:
+            raise StorageError("Current box rack positions do not fit inside the updated rack layout")
+
+
+def _parse_grid_label(value: str | None) -> tuple[int | None, int | None]:
+    raw = (value or "").strip().upper()
+    if not raw:
+        return (None, None)
+    letters: list[str] = []
+    digits: list[str] = []
+    for character in raw:
+        if character.isalpha() and not digits:
+            letters.append(character)
+            continue
+        if character.isdigit():
+            digits.append(character)
+            continue
+        return (None, None)
+    if not letters or not digits:
+        return (None, None)
+    col = 0
+    for character in letters:
+        col = (col * 26) + (ord(character) - 64)
+    row = int("".join(digits))
+    if row <= 0 or col <= 0:
+        return (None, None)
+    return (row, col)
+
+
+def _parse_rack_slot_label(value: str | None) -> tuple[int | None, int | None]:
+    raw = (value or "").strip().upper()
+    if not raw:
+        return (None, None)
+    if raw.startswith("R") and "C" in raw[1:]:
+        c_index = raw.find("C", 1)
+        row_text = raw[1:c_index]
+        col_text = raw[c_index + 1 :]
+        if row_text.isdigit() and col_text.isdigit():
+            row = int(row_text)
+            col = int(col_text)
+            if row > 0 and col > 0:
+                return (row, col)
+        return (None, None)
+    return _parse_grid_label(raw)
 
 
 def _finalize(db: Session, entity, commit: bool) -> None:

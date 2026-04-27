@@ -1,15 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card samples-workspace" data-samples-table>
+  <div class="samples-page-head">
+    <div>
+      <p class="eyebrow">Inventory</p>
+      <h1>Samples</h1>
+    </div>
+    <p class="muted">Search, filter, and stage samples for batch workflows.</p>
+  </div>
+
   <div class="samples-toolbar">
     <label class="samples-search-field">
       <span class="muted">Search</span>
-      <input
-        type="search"
-        id="samples-live-search"
-        placeholder="Search ID, study, type, visit, timepoint, notes, location"
-        autocomplete="off"
-      />
+      <span class="samples-search-control">
+        <input
+          type="search"
+          id="samples-live-search"
+          placeholder="Search ID, study, type, visit, timepoint, notes, location"
+          autocomplete="off"
+        />
+        <button type="button" class="ghost-button samples-search-clear hidden" id="samples-search-clear" hidden>Clear</button>
+      </span>
     </label>
     <div class="samples-toolbar-actions">
       <button type="button" class="icon-button column-picker-button" id="samples-column-picker-button" title="Choose visible columns">
@@ -17,22 +28,27 @@
       </button>
       <button type="button" class="ghost-button hidden" id="samples-analysis-toggle" hidden>Select</button>
       <div class="samples-analysis-actions hidden" id="samples-analysis-actions" hidden>
-        <button type="button" class="ghost-button" id="samples-analysis-add">Add to selection</button>
-        <button type="button" class="ghost-button" id="samples-analysis-remove">Remove from selection</button>
-        <a class="button" href="/sample-actions" id="samples-analysis-start">Open actions workspace</a>
-        <button type="button" class="ghost-button" id="samples-analysis-clear">Clear selection</button>
+        <button type="button" class="ghost-button" id="samples-analysis-add">Stage checked</button>
+        <button type="button" class="ghost-button" id="samples-analysis-remove">Unstage checked</button>
+        <a class="button" href="/sample-actions" id="samples-analysis-start">Open workspace</a>
+        <button type="button" class="ghost-button" id="samples-analysis-clear">Clear staged</button>
       </div>
       {% if can_bulk_import_samples %}
-        <button type="button" class="ghost-button" id="samples-bulk-open">Bulk Add</button>
+        <button type="button" class="ghost-button samples-normal-mode-action" id="samples-bulk-open">Bulk Add</button>
       {% endif %}
-      <a class="button" href="/samples/new">Add Sample</a>
+      <a class="button samples-normal-mode-action" href="/samples/new" id="samples-add-sample-link">Add Sample</a>
     </div>
   </div>
 
   <div class="samples-active-state">
     <div class="samples-filter-chips" id="samples-filter-chips"></div>
-    <p class="muted samples-result-count" id="samples-result-count"></p>
+    <div class="samples-state-actions">
+      <p class="muted samples-result-count" id="samples-result-count"></p>
+      <button type="button" class="ghost-button samples-reset-filters hidden" id="samples-reset-filters" hidden>Reset filters</button>
+    </div>
   </div>
+  <p class="muted samples-filter-hint">Click a column header to sort or filter that field.</p>
+  <div class="samples-selection-summary hidden" id="samples-selection-summary" role="status" aria-live="polite" hidden></div>
 
   <div class="sample-table-wrap">
     <table class="table sample-table" id="samples-live-table">
@@ -64,7 +80,10 @@
       </div>
 
       <div class="samples-bulk-actions">
-        <a class="ghost-button" href="/samples/bulk/template">Download Excel Template</a>
+        <a class="ghost-button bulk-download-card" href="/samples/bulk/template">
+          <strong>Download Excel Template</strong>
+          <span>Use this workbook for sample imports.</span>
+        </a>
         <label class="samples-bulk-upload-field">
           <span>Upload completed template</span>
           <input

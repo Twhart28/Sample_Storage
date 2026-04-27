@@ -3,8 +3,8 @@
 <section class="page-head card compact">
   <div>
     <p class="eyebrow">Visit Session</p>
-    <h1>{{ session.study_name }} · {{ session.participant_id }}</h1>
-    <p class="muted">{{ session.workflow_label }} · {{ format_datetime(session.visit_date) }}</p>
+    <h1>{{ session.study_name }} / {{ session.participant_id }}</h1>
+    <p class="muted">{{ session.workflow_label }} / {{ format_datetime(session.visit_date) }}</p>
   </div>
   <div class="page-actions">
     <span class="status-pill">{{ session.status.replace('_', ' ').title() }}</span>
@@ -19,8 +19,8 @@
   <p class="form-error">{{ error_message }}</p>
 {% endif %}
 
-<section class="workspace-grid">
-  <article class="card">
+<section class="visit-detail-grid">
+  <article class="card visit-detail-card">
     <h2>Visit Details</h2>
     <dl class="detail-grid">
       <div><dt>Study</dt><dd>{{ session.study_name }}</dd></div>
@@ -35,7 +35,17 @@
     {% endif %}
   </article>
 
-  <article class="card">
+  <article class="card visit-progress-card">
+    <h2>Workflow Progress</h2>
+    <div class="visit-step-list">
+      <span class="visit-step {% if session.step_status.template_downloaded_at %}is-complete{% endif %}">Template downloaded</span>
+      <span class="visit-step {% if session.step_status.workbook_uploaded_at %}is-complete{% endif %}">Workbook uploaded</span>
+      <span class="visit-step {% if session.step_status.sample_import_committed_at or session.status == 'completed' %}is-complete{% endif %}">Sample import committed</span>
+      <span class="visit-step {% if session.step_status.summary_reviewed_at %}is-complete{% endif %}">Summary reviewed</span>
+    </div>
+  </article>
+
+  <article class="card visit-quick-links-card">
     <h2>Quick Links</h2>
     <div class="stack-list">
       {% for link in session.quick_links %}
@@ -49,8 +59,8 @@
   </article>
 </section>
 
-<section class="workspace-grid">
-  <article class="card">
+<section class="visit-detail-grid visit-work-grid">
+  <article class="card visit-notes-card">
     <h2>Visit Notes</h2>
     <form method="post" action="/visit-workflows/{{ session.id }}/notes" class="stack-form compact-form">
       <label>Notes
@@ -60,9 +70,12 @@
     </form>
   </article>
 
-  <article class="card">
-    <h2>Workbook Upload</h2>
-    <div class="actions-row">
+  <article class="card visit-upload-card">
+    <div class="section-head">
+      <div>
+        <h2>Workbook</h2>
+        <p class="muted">Download the study template, complete it offline, then upload it here for preview.</p>
+      </div>
       <a class="button" href="/visit-workflows/{{ session.id }}/template">Download visit template</a>
     </div>
     <form method="post" action="/visit-workflows/{{ session.id }}/preview" enctype="multipart/form-data" class="stack-form compact-form">

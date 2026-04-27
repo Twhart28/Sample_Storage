@@ -581,7 +581,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertEqual(sheet["O2"].value, "Plasma")
         self.assertEqual(sheet["Q2"].value, "current")
         self.assertEqual(sheet["S2"].value, "30")
-        self.assertEqual(sheet["U2"].value, 1)
+        self.assertEqual(sheet["U2"].value, "1")
 
     def test_batch_modify_preview_and_commit_updates_samples_and_groups_events(self):
         alt_type = admin_service.create_sample_type(
@@ -1362,6 +1362,100 @@ class SampleWorkflowServiceTests(unittest.TestCase):
                 self.user,
             )
 
+    def test_rack_layout_and_box_slot_are_stored_and_shown_in_tree(self):
+        rack = storage_service.update_storage_node(
+            self.session,
+            self.rack.id,
+            StorageNodeUpdate(name="Rack 1", notes=self.rack.notes, rack_rows=3, rack_cols=5),
+            self.user,
+        )
+        box = storage_service.update_storage_node(
+            self.session,
+            self.box.id,
+            StorageNodeUpdate(name="Box 1", notes=self.box.notes, rack_slot="C2"),
+            self.user,
+        )
+
+        self.assertEqual(rack.rack_layout_label, "3 rows x 5 cols")
+        self.assertEqual(box.rack_slot_label, "C2")
+
+        tree = storage_service.list_storage_tree(self.session)
+        freezer = next(node for node in tree if node.name == "Freezer A")
+        shelf = next(node for node in freezer.children if node.name == "Shelf 1")
+        rack_view = next(node for node in shelf.children if node.name == "Rack 1")
+        box_view = next(node for node in rack_view.children if node.name == "Box 1")
+
+        self.assertEqual(rack_view.rack_layout_label, "3 rows x 5 cols")
+        self.assertEqual(box_view.rack_slot_label, "C2")
+        self.assertEqual(box_view.rack_slot_col_label, "C")
+
+    def test_box_rack_slot_requires_layout_is_unique_and_clears_on_move(self):
+        storage_service.update_storage_node(
+            self.session,
+            self.rack.id,
+            StorageNodeUpdate(name="Rack 1", notes=self.rack.notes, rack_rows=2, rack_cols=2),
+            self.user,
+        )
+        second_box = storage_service.create_storage_node(
+            self.session,
+            StorageNodeCreate(name="Box 3", node_type="box", parent_id=self.rack.id),
+            self.user,
+        )
+
+        first_box = storage_service.update_storage_node(
+            self.session,
+            self.box.id,
+            StorageNodeUpdate(name="Box 1", notes=self.box.notes, rack_slot="A1"),
+            self.user,
+        )
+        self.assertEqual(first_box.rack_slot_label, "A1")
+
+        same_parent_move = storage_service.move_storage_node(
+            self.session,
+            self.box.id,
+            StorageNodeMoveInput(parent_id=self.rack.id),
+            self.user,
+        )
+        self.assertEqual(same_parent_move.rack_slot_label, "A1")
+
+        with self.assertRaises(storage_service.StorageError):
+            storage_service.update_storage_node(
+                self.session,
+                second_box.id,
+                StorageNodeUpdate(name="Box 3", notes=second_box.notes, rack_slot="A1"),
+                self.user,
+            )
+
+        moved_box = storage_service.move_storage_node(
+            self.session,
+            self.box.id,
+            StorageNodeMoveInput(parent_id=self.shelf.id),
+            self.user,
+        )
+        self.assertIsNone(moved_box.rack_slot_label)
+
+    def test_rack_layout_cannot_shrink_past_existing_box_slots(self):
+        storage_service.update_storage_node(
+            self.session,
+            self.rack.id,
+            StorageNodeUpdate(name="Rack 1", notes=self.rack.notes, rack_rows=3, rack_cols=3),
+            self.user,
+        )
+        storage_service.update_storage_node(
+            self.session,
+            self.box.id,
+            StorageNodeUpdate(name="Box 1", notes=self.box.notes, rack_slot="C3"),
+            self.user,
+        )
+
+        with self.assertRaises(storage_service.StorageError):
+            storage_service.update_storage_node(
+                self.session,
+                self.rack.id,
+                StorageNodeUpdate(name="Rack 1", notes=self.rack.notes, rack_rows=2, rack_cols=2),
+                self.user,
+            )
+
     def test_unique_names_for_freezers_and_boxes(self):
         with self.assertRaises(storage_service.StorageError):
             storage_service.create_storage_node(
@@ -1798,9 +1892,9 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         sample_sheet["K2"] = 0
         sample_sheet["L2"] = "Fresh draw"
         sample_sheet["M2"] = "03/28/26 10:15"
-        sample_sheet["N2"] = "Box 1"
-        sample_sheet["O2"] = "A1"
-        sample_sheet["P2"] = "specific"
+        sample_sheet["N2"] = "specific"
+        sample_sheet["O2"] = "Box 1"
+        sample_sheet["P2"] = "A1"
         buffer = BytesIO()
         workbook.save(buffer)
 
@@ -1895,8 +1989,8 @@ class SampleWorkflowServiceTests(unittest.TestCase):
     def test_bulk_box_import_creates_box_under_existing_shelf(self):
         raw_payload = "\n".join(
             [
-                "parent,box,rows,cols,notes",
-                "Freezer A > Shelf 1,Box 20,2,3,Created in bulk",
+                "parent,box,rack_slot,rows,cols,notes",
+                "Freezer A > Shelf 1,Box 20,,2,3,Created in bulk",
             ]
         )
 
@@ -1920,15 +2014,15 @@ class SampleWorkflowServiceTests(unittest.TestCase):
     def test_bulk_box_import_accepts_shelf_and_rack_parent_paths(self):
         existing_rack = storage_service.create_storage_node(
             self.session,
-            StorageNodeCreate(name="Rack Path", node_type="rack", parent_id=self.shelf.id),
+            StorageNodeCreate(name="Rack Path", node_type="rack", parent_id=self.shelf.id, rack_rows=3, rack_cols=4),
             self.user,
         )
         self.assertIsNotNone(existing_rack)
         raw_payload = "\n".join(
             [
-                "parent,box,rows,cols,notes",
-                "Freezer A > Shelf 1,Box Path Shelf,2,2,Created from shelf path",
-                "Freezer A > Shelf 1 > Rack Path,Box Path Rack,2,2,Created from rack path",
+                "parent,box,rack_slot,rows,cols,notes",
+                "Freezer A > Shelf 1,Box Path Shelf,,2,2,Created from shelf path",
+                "Freezer A > Shelf 1 > Rack Path,Box Path Rack,B2,2,2,Created from rack path",
             ]
         )
 
@@ -1950,6 +2044,7 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         rack_box = next(node for node in nodes if node.node_type.value == "box" and node.name == "Box Path Rack")
         self.assertEqual(shelf_box.parent_id, self.shelf.id)
         self.assertEqual(rack_box.parent_id, existing_rack.id)
+        self.assertEqual(rack_box.rack_slot_label, "B2")
 
     def test_storage_tree_includes_box_capacity_counts(self):
         self.create_and_place_sample("TREE-001", position_id=self.positions[0].id)
@@ -1987,9 +2082,9 @@ class SampleWorkflowServiceTests(unittest.TestCase):
     def test_bulk_box_import_rejects_invalid_parent_and_duplicate_box(self):
         raw_payload = "\n".join(
             [
-                "parent,box,rows,cols,notes",
-                "Freezer A,Box 30,2,2,Parent too shallow",
-                "Freezer A > Shelf 1,Box 1,0,2,Duplicate and invalid dimensions",
+                "parent,box,rack_slot,rows,cols,notes",
+                "Freezer A,Box 30,,2,2,Parent too shallow",
+                "Freezer A > Shelf 1,Box 1,,0,2,Duplicate and invalid dimensions",
             ]
         )
 
@@ -2013,6 +2108,9 @@ class SampleWorkflowServiceTests(unittest.TestCase):
         self.assertEqual(sheet["A1"].alignment.horizontal, "center")
         self.assertIsNotNone(sheet["A1"].comment)
         self.assertIn("existing shelf or rack path", sheet["A1"].comment.text)
+        self.assertEqual(sheet["C1"].value, "rack_slot")
+        self.assertIsNotNone(sheet["C1"].comment)
+        self.assertIn("A2 or C4", sheet["C1"].comment.text)
         self.assertEqual(lookup_sheet["A2"].value, "Freezer A > Shelf 1")
         self.assertEqual(lookup_sheet["A3"].value, "Freezer A > Shelf 1 > Rack 1")
 
@@ -2023,14 +2121,14 @@ class SampleWorkflowServiceTests(unittest.TestCase):
 
         sheet["A3"] = "Freezer A > Shelf 1"
         sheet["B3"] = "Box 99"
-        sheet["C3"] = 2
-        sheet["D3"] = 3
+        sheet["D3"] = 2
+        sheet["E3"] = 3
         buffer = BytesIO()
         workbook.save(buffer)
 
         raw_payload = bulk_import_service.box_workbook_to_csv(buffer.getvalue())
-        self.assertIn("parent,box,rows,cols,notes", raw_payload)
-        self.assertIn("Freezer A > Shelf 1,Box 99,2,3", raw_payload)
+        self.assertIn("parent,box,rack_slot,rows,cols,notes", raw_payload)
+        self.assertIn("Freezer A > Shelf 1,Box 99,,2,3", raw_payload)
 
 
 if __name__ == "__main__":
